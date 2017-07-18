@@ -1,0 +1,16 @@
+
+# pysdruhd
+
+This is a C python extension that wraps UHD in a friendly way. The goal here is to make a UHD interface that doesn't get in the way and feels like python.
+
+## Building
+
+You need python (currently I don't do much cmake-fu to detect python versions, so only 2 works), numpy, and UHD. You build like any other cmake project.
+
+## Status
+
+There's a ton of features missing and it's not so graceful when things fail. You can either wait for that to improve, try to fix and add things, or ignore the project.
+
+## Copying and using
+
+This is licensed with GPLv3. You should follow those rules, but you should also be a nice person and share any changes or improvements. Additionally if you make something cool, at least publish a blog post or paper in an open access journal about it (and ideally share code).
