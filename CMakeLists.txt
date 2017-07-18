@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.0) # I don't actually know!
 project(pysdruhd)
 
 set(CMAKE_C_STANDARD 99)

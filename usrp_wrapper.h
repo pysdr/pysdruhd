@@ -92,32 +92,51 @@ static void
 Usrp_dealloc(Usrp *self) {
     printf("deallocing usrp\n");
     Py_XDECREF(self->addr);
-    Py_XDECREF(self->usrp_type);
+    Py_XDECREF(self->usrp_object);
 
-    uhd_rx_streamer_free(self->rx_streamer);
-    uhd_rx_metadata_free(self->rx_metadata);
+    if (self->rx_streamer != NULL) {
+        uhd_rx_streamer_free(self->rx_streamer);
+        free(self->rx_streamer);
+        self->rx_streamer = NULL;
+    }
 
-    uhd_tx_streamer_free(self->tx_streamer);
-    //uhd_tx_metadata_free(self->tx_metadata);
+    if (self->rx_metadata != NULL) {
+        uhd_rx_metadata_free(self->rx_metadata);
+        free(self->rx_metadata);
+        self->rx_metadata = NULL;
+    }
 
-    uhd_usrp_free((self->usrp_object));
-    free(self->usrp_object);
-    free(self->rx_streamer);
-    free(self->rx_metadata);
-    free(self->tx_streamer);
-    //free(self->tx_metadata);
-    free(self->rx_streams);
-    free(self->tx_streams);
+    if (self->tx_streamer != NULL) {
+        uhd_tx_streamer_free(self->tx_streamer);
+        free(self->tx_streamer);
+        self->tx_streamer = NULL;
+    }
+
+    if (self->usrp_object != NULL) {
+        uhd_usrp_free((self->usrp_object));
+        free(self->usrp_object);
+        self->usrp_object = NULL;
+    }
+
+    if (self->rx_streams != NULL) {
+        free(self->rx_streams);
+        self->rx_streams = NULL;
+    }
+
+    if (self->tx_streams != NULL) {
+        free(self->tx_streams);
+        self->tx_streams = NULL;
+    }
 
     if (self->recv_buffers != NULL) {
         free(self->recv_buffers);
+        self->recv_buffers = NULL;
     }
+
     if (self->recv_buffers_ptr != NULL) {
         free(self->recv_buffers_ptr);
+        self->recv_buffers_ptr = NULL;
     }
-    self->recv_buffers = NULL;
-    self->recv_buffers_ptr = NULL;
-
 
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
@@ -169,17 +188,17 @@ static int
 Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
 {
     /* DEBUG */ printf("init()\n");
-    PyObject *addr = NULL, *tmp = NULL;
+    PyObject *addr = NULL, *addr2 = NULL, *tmp = NULL;
     PyObject *usrp_type = NULL;
     PyObject *streams_dict = NULL;
     double frequency_param = 910e6;
     double rate_param = 1e6;
     double gain_param = 0;
 
-    static char *kwlist[] = {"addr", "type", "streams", "frequency", "rate", "gain", NULL};
+    static char *kwlist[] = {"addr", "addr2", "type", "streams", "frequency", "rate", "gain", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OOOddd", kwlist,
-                                     &addr, &usrp_type, &streams_dict, &frequency_param, &rate_param, &gain_param
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OOOOddd", kwlist,
+                                     &addr, &addr2, &usrp_type, &streams_dict, &frequency_param, &rate_param, &gain_param
     )) {
         return -1;
     }
@@ -193,8 +212,15 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         Py_INCREF(addr);
         self->addr = addr;
         Py_XDECREF(tmp);
-        snprintf(device_args, 18, "addr=%s", PyString_AsString(addr));
+        snprintf(device_args, 18, "addr=%s,", PyString_AsString(addr));
     }
+    if (addr2) {
+        // Erg. what to do about the internal addr we keep around....
+        char addr2string[64] = {'\0'}; // we could check the length of the python string
+        snprintf(addr2string, 18, "second_addr=%s,", PyString_AsString(addr2));
+        strcat(device_args, addr2string);
+    }
+
     if (usrp_type) {
         tmp = self->usrp_type;
         Py_INCREF(usrp_type);
@@ -221,9 +247,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     uhd_usrp_get_pp_string(*self->usrp_object, usrp_pp, 2048);
     /* DEV HELPER */ printf("usrp: %s\n", usrp_pp);
 
-
-    size_t number_channels = PyDict_Size(streams_dict);
-    number_channels = number_channels > 1 ? number_channels : 1;
     size_t channel[] = {0, 1, 2, 3};
     char rx_subdev_spec_string[64] = {'\0'};
 
@@ -242,12 +265,8 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
                 PyObject *value;
 
                 strncpy(this_subdev.subdev, PyString_AsString(subdev), 6);
-                puts("getting itemstring from mode");
-                fflush(stdout);
                 const char mode_key[] = "mode";
                 value = PyDict_GetItemString(config, mode_key);
-                puts("got itemstring from mode\n");
-                fflush(stdout);
                 this_subdev.mode = convert_string_to_stream_mode_t(value);
                 this_subdev.frequency = frequency_param;
                 this_subdev.rate = rate_param;
