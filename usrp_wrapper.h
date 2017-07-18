@@ -92,7 +92,7 @@ static void
 Usrp_dealloc(Usrp *self) {
     printf("deallocing usrp\n");
     Py_XDECREF(self->addr);
-    Py_XDECREF(self->usrp_object);
+    Py_XDECREF(self->usrp_type);
 
     if (self->rx_streamer != NULL) {
         uhd_rx_streamer_free(self->rx_streamer);
@@ -113,7 +113,7 @@ Usrp_dealloc(Usrp *self) {
     }
 
     if (self->usrp_object != NULL) {
-        uhd_usrp_free((self->usrp_object));
+        uhd_usrp_free(self->usrp_object);
         free(self->usrp_object);
         self->usrp_object = NULL;
     }
@@ -231,9 +231,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         strcat(device_args, typestring);
     }
 
-    /* zomg this is so bad! */
-    sprintf(device_args, "addr=192.168.30.2,second_addr=192.168.40.2");
-    /* barf */
     printf("Opening USRP with args: \"%s\"\n", device_args);
     fflush(stdout);
 
@@ -338,7 +335,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     double checkval;
 
 
-    char antennas[8][4] = {"RX1", "RX2", "RX1", "RX2"};
+    char antennas[8][4] = {"RX1", "RX2", "RX1", "RX2"}; // This unfortunately needs to be in the dict. It could be different for TWINRX, basicrx, and a every other card
     uhd_subdev_spec_handle subdev_spec;
     printf("subdev spec string: %s\n", rx_subdev_spec_string);
     uhd_subdev_spec_make(&subdev_spec, rx_subdev_spec_string);
@@ -417,28 +414,34 @@ static PyMemberDef Usrp_members[] = {
 static PyObject *
 Usrp_recv(Usrp *self) {
     size_t rx_samples_count = 0;
-    time_t full_secs;
-    double frac_secs;
+    time_t full_secs = 0;
+    double frac_secs = 0.;
     uhd_error uhd_errno;
 
     uhd_errno = uhd_rx_streamer_recv(*self->rx_streamer, self->recv_buffers_ptr, self->samples_per_buffer,
                                                self->rx_metadata, 3.0, false, &rx_samples_count);
 
     uhd_errno = uhd_rx_metadata_time_spec(*self->rx_metadata, &full_secs, &frac_secs);
+    PyObject *metadata = PyTuple_New(2);
+    PyTuple_SET_ITEM(metadata, 0, PyInt_FromSize_t(full_secs));
+    PyTuple_SET_ITEM(metadata, 1, PyFloat_FromDouble(frac_secs));
 
-    int ndims = (int) self->number_rx_streams;
     npy_intp shape[2];
     shape[0] = self->number_rx_streams;
     shape[1] = rx_samples_count;
 
-    return PyArray_SimpleNewFromData(2, shape, NPY_COMPLEX64, self->recv_buffers);
+    PyObject *return_val = PyTuple_New(2);
+    PyTuple_SET_ITEM(return_val, 0, PyArray_SimpleNewFromData(2, shape, NPY_COMPLEX64, self->recv_buffers));
+    PyTuple_SET_ITEM(return_val, 1, metadata);
+    return return_val;
 }
 
 
 static PyMethodDef Usrp_methods[] = {
         {"recv", (PyCFunction) Usrp_recv, METH_NOARGS,
-                "samples = Usrp.recv() will return an ndarray of shape (nchannels, nsamples) where nchannels\
+                "samples, metadata = Usrp.recv() will return an ndarray of shape (nchannels, nsamples) where nchannels\
  the number of subdevs specified during construction and nsamples is the number of samples in the packet returned by UHD"},
+        // TODO: set up gps, return gps (and other?) sensor values, set time, etc...
         {NULL}  /* Sentinel */
 };
 
@@ -455,7 +458,7 @@ static const char Usrp_docstring[] =
             gain: <double> the requested gain \n\
 \n\
         The primary function of a Usrp is to transmit and receive samples. These are handled through \n\
-        samples = Usrp.recv() \n\
+        samples, metadata = Usrp.recv() \n\
         Usrp.transmit(samples) \n\
 \n\
         In both cases samples is a numpy array with shape (nchannels, nsamps) \n\

@@ -1,10 +1,10 @@
 
 import pysdruhd as uhd
 
-x300 = uhd.Usrp(address="192.168.40.2", rate=50e6)
+x300 = uhd.Usrp(type="b200", rate=12.5e6)
 
 sample_count = 0
-for xx in xrange(100):
+for xx in xrange(1000):
     samples = x300.recv()
     sample_count += samples.__len__()
 
