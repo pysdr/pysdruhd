@@ -412,7 +412,8 @@ static PyMemberDef Usrp_members[] = {
 
 
 static PyObject *
-Usrp_recv(Usrp *self) {
+Usrp_recv(Usrp *self)
+{
     size_t rx_samples_count = 0;
     time_t full_secs = 0;
     double frac_secs = 0.;
@@ -436,11 +437,82 @@ Usrp_recv(Usrp *self) {
     return return_val;
 }
 
+static PyObject *
+Usrp_sensor_names(Usrp *self)
+{
+    uhd_error uhd_errno;
+    uhd_string_vector_handle sensor_names;
+    uhd_string_vector_make(&sensor_names);
+    uhd_errno = uhd_usrp_get_mboard_sensor_names(*self->usrp_object, 0, &sensor_names);
+    size_t number_sensors;
+    uhd_string_vector_size(sensor_names, &number_sensors);
+    PyObject *sensor_names_list = PyList_New(0);
+
+    for (unsigned int ii=0; ii < number_sensors; ++ii) {
+        char sensor_name[64];
+        uhd_errno = uhd_string_vector_at(sensor_names, ii, sensor_name, 64);
+        PyList_Append(sensor_names_list, PyString_FromString(sensor_name));
+    }
+    uhd_errno = uhd_string_vector_free(&sensor_names);
+    return sensor_names_list;
+}
+
+static PyObject *
+Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds)
+{
+
+    static char *kwlist[] = {"sensor", NULL};
+    PyObject *sensor_string = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kwlist,
+                                     &sensor_string, &sensor_string
+    )) {
+        return NULL;
+    }
+    uhd_error uhd_errno;
+    uhd_sensor_value_handle sensor_value;
+    uhd_sensor_value_make_from_string(&sensor_value, "w", "t", "f");
+    uhd_usrp_get_mboard_sensor(*self->usrp_object, PyString_AsString(sensor_string), 0, &sensor_value);
+    uhd_sensor_value_data_type_t sensor_dtype;
+    uhd_sensor_value_data_type(sensor_value, &sensor_dtype);
+    PyObject *return_sensor_value;
+    bool boolval;
+    int intval;
+    double doubleval;
+    char charval[4096];
+
+    switch (sensor_dtype) {
+        case UHD_SENSOR_VALUE_BOOLEAN:
+            uhd_sensor_value_to_bool(sensor_value, &boolval);
+            return_sensor_value = PyBool_FromLong(boolval);
+            break;
+        case UHD_SENSOR_VALUE_INTEGER:
+            uhd_sensor_value_to_int(sensor_value, &intval);
+            return_sensor_value = PyInt_FromLong(intval);
+            break;
+        case UHD_SENSOR_VALUE_REALNUM:
+            uhd_sensor_value_to_realnum(sensor_value, &doubleval);
+            return_sensor_value = PyFloat_FromDouble(doubleval);
+            break;
+        case UHD_SENSOR_VALUE_STRING:
+            uhd_sensor_value_to_pp_string(sensor_value, charval, 4096);
+            return_sensor_value = PyString_FromString(charval);
+            break;
+        default:
+            return_sensor_value = Py_None;
+    }
+
+    return return_sensor_value;
+}
 
 static PyMethodDef Usrp_methods[] = {
         {"recv", (PyCFunction) Usrp_recv, METH_NOARGS,
                 "samples, metadata = Usrp.recv() will return an ndarray of shape (nchannels, nsamples) where nchannels\
  the number of subdevs specified during construction and nsamples is the number of samples in the packet returned by UHD"},
+        {"sensor_names", (PyCFunction) Usrp_sensor_names, METH_NOARGS,
+                "print the sensor names"},
+        {"get_sensor", (PyCFunction) Usrp_get_sensor, METH_VARARGS|METH_KEYWORDS,
+                "get the value of a sensor"},
         // TODO: set up gps, return gps (and other?) sensor values, set time, etc...
         {NULL}  /* Sentinel */
 };
