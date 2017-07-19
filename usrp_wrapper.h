@@ -42,7 +42,7 @@ stream_mode_t convert_string_to_stream_mode_t(PyObject *string_mode) {
     puts("made it to convert\n");
     fflush(stdout);
     if (string_mode != NULL && PyString_CheckExact(string_mode)) {
-        Py_ssize_t compare_length = PyString_Size(string_mode);
+        size_t compare_length = (size_t) PyString_Size(string_mode);
         if (strncmp("TX\0", PyString_AsString(string_mode), MIN(compare_length, 2)) == 0) {
             mode = TX_STREAM;
         } else if (strncmp("RX\0", PyString_AsString(string_mode), MIN(compare_length, 2)) == 0) {
@@ -187,7 +187,6 @@ Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 static int
 Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
 {
-    /* DEBUG */ printf("init()\n");
     PyObject *addr = NULL, *addr2 = NULL, *tmp = NULL;
     PyObject *usrp_type = NULL;
     PyObject *streams_dict = NULL;
@@ -202,7 +201,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     )) {
         return -1;
     }
-    /* DEBUG */ printf("parsed args in init\n");
 
     uhd_error uhd_errno;
     char *device_args = malloc(40);
@@ -328,9 +326,9 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
      */
     uhd_stream_cmd_t stream_cmd = {
             .stream_mode = UHD_STREAM_MODE_START_CONTINUOUS,
-            .stream_now = false,
-            .time_spec_full_secs = 1,
-            .time_spec_frac_secs= 0.,
+            .stream_now = true,
+            //.time_spec_full_secs = 1,
+            //.time_spec_frac_secs= 0.,
     };
     double checkval;
 
@@ -383,10 +381,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
             self->recv_buffers_ptr[rx_stream_index] = self->recv_buffers + (rx_stream_index * buffer_size_per_channel);
             printf("buffer for channel %lu is %p\n", rx_stream_index, self->recv_buffers_ptr[rx_stream_index]);
         }
-
-        uhd_usrp_set_time_source(*self->usrp_object,"gpsdo", 0);
-        uhd_usrp_set_time_now(*self->usrp_object, 0, 0.0, 0);
-        uhd_errno = uhd_rx_streamer_issue_stream_cmd(*self->rx_streamer, &stream_cmd);
     }
     uhd_subdev_spec_free(&subdev_spec);
 
@@ -505,6 +499,98 @@ Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds)
     return return_sensor_value;
 }
 
+static PyObject *
+Usrp_set_master_clock_rate(Usrp *self, PyObject *args)
+{
+    double clock_rate;
+    if (!PyArg_ParseTuple(args, "d",
+                          &clock_rate)) {
+        return NULL;
+    }
+
+    uhd_usrp_set_master_clock_rate(*self->usrp_object, clock_rate, 0);
+    uhd_usrp_get_master_clock_rate(*self->usrp_object, 0, &clock_rate);
+    return PyFloat_FromDouble(clock_rate);
+}
+
+static PyObject *
+Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
+{
+    PyObject *when=NULL, *time=NULL;
+    static char *kwlist[] = {"time", "when", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OO", kwlist,
+                                     &time, &when
+    )) {
+        return NULL;
+    }
+
+    int full_secs = 0;
+    double fractional_secs = 0.0;
+
+    if (time != NULL) {
+        if (PyString_Check(time)) { /* if we got a string it should say gps */
+            if (strncmp(PyString_AsString(time), "gps", MIN((size_t) PyString_Size(time), 3))) {
+                // we want to set the time next pps to whatever the gpsdo is
+                uhd_sensor_value_handle sensor_value;
+                uhd_sensor_value_make_from_string(&sensor_value, "w", "t", "f");
+                uhd_error uhd_errno = uhd_usrp_get_mboard_sensor(*self->usrp_object, "gps_time", 0, &sensor_value);
+                if (uhd_errno == UHD_ERROR_NONE) {
+                    uhd_sensor_value_data_type_t sensor_dtype;
+                    uhd_sensor_value_data_type(sensor_value, &sensor_dtype);
+                    full_secs = uhd_sensor_value_to_int(sensor_value, &full_secs);
+                }
+
+            }
+        }
+        else if (PyTuple_Check(time) && PyTuple_Size(time)==2) { /* if we got a tuple, then it's whole secs, fractional secs. a very sexy time */
+            full_secs = (int) PyInt_AsLong(PyTuple_GetItem(time, 0));
+            fractional_secs = PyInt_AsLong(PyTuple_GetItem(time, 1));
+        }
+    }
+
+    if (when != NULL && PyString_Check(when)) {
+        char *data = PyString_AsString(when);
+        if (strncmp(data, "now", 3) == 0) {
+            uhd_usrp_set_time_now(*self->usrp_object, full_secs, fractional_secs, 0);
+        } else {
+            uhd_usrp_set_time_next_pps(*self->usrp_object, full_secs, fractional_secs, 0);
+        }
+    } else { // Default to next pps
+        uhd_usrp_set_time_next_pps(*self->usrp_object, full_secs, fractional_secs, 0);
+    }
+
+    return Py_None;
+}
+
+
+static PyObject *
+Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds)
+{
+    PyObject *command;
+
+    if (!PyArg_ParseTuple(args, "O", &command)) {
+        return NULL;
+    }
+
+    /* This should really be made adjustable, which would make this wrapper probably
+     * the only place that this is an easy way to get streaming started at a time
+     * that you care about
+     */
+    uhd_stream_cmd_t stream_cmd = {
+            .stream_mode = UHD_STREAM_MODE_START_CONTINUOUS,
+            .stream_now = true,
+            //.time_spec_full_secs = 1,
+            //.time_spec_frac_secs= 0.,
+    };
+    uhd_usrp_set_time_source(*self->usrp_object, "internal", 0);
+    uhd_usrp_set_time_now(*self->usrp_object, 0, 0.0, 0);
+    uhd_error uhd_errno = uhd_rx_streamer_issue_stream_cmd(*self->rx_streamer, &stream_cmd);
+
+    return Py_None;
+}
+
+
 static PyMethodDef Usrp_methods[] = {
         {"recv", (PyCFunction) Usrp_recv, METH_NOARGS,
                 "samples, metadata = Usrp.recv() will return an ndarray of shape (nchannels, nsamples) where nchannels\
@@ -513,7 +599,14 @@ static PyMethodDef Usrp_methods[] = {
                 "print the sensor names"},
         {"get_sensor", (PyCFunction) Usrp_get_sensor, METH_VARARGS|METH_KEYWORDS,
                 "get the value of a sensor"},
-        // TODO: set up gps, return gps (and other?) sensor values, set time, etc...
+        {"set_master_clock_rate", (PyCFunction) Usrp_set_master_clock_rate, METH_VARARGS,
+                "set the master clock rate. Usually has some impact on ADC/DAC rate."},
+        {"set_time", (PyCFunction) Usrp_set_time, METH_VARARGS|METH_KEYWORDS,
+                "set_time(when='pps', time=0).\n\n"
+                        "`time` is either a tuple of (full seconds, fractional seconds) or 'gps'"
+                        "`when` should be a string matching either 'now' or 'pps'"},
+        {"send_stream_command", (PyCFunction) Usrp_send_stream_command, METH_VARARGS|METH_KEYWORDS,
+                "send_stream_command(command={'mode':'continuous', 'now':true,}) Accepts a dict as a stream command and sends that to the USRP."},
         {NULL}  /* Sentinel */
 };
 
