@@ -1,7 +1,7 @@
 
 # pysdruhd
 
-This is a C python extension that wraps UHD in a friendly way. The goal here is to make a UHD interface that doesn't get in the way and feels like python.
+This is a C python extension that wraps UHD in a friendly way. The goal here is to make a UHD interface that doesn't get in the way and feels like python. The purpose of this is not to provide a 1:1 API exposure to UHD, but to make it easy to do the things I'm interested in doing from python.
 
 ## Building
 
