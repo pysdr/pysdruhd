@@ -249,7 +249,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         strcat(device_args, typestring);
     }
 
-    if (!uhd_errno = uhd_usrp_make(self->usrp_object, device_args)) {
+    if (!uhd_errno == uhd_usrp_make(self->usrp_object, device_args)) {
         return -1;
     }
 
