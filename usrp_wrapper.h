@@ -66,6 +66,20 @@ typedef struct {
     char identifier[10]; /* such as TX/RX, RX2, RX1.... (would be nice to have a card type identifier) */
 } stream_config_t;
 
+
+static bool uhd_ok(uhd_error error_value)
+{
+    if (error_value == UHD_ERROR_NONE) {
+        return true;
+    } else {
+        char uhd_error_string[8192];
+        uhd_get_last_error(uhd_error_string, 8192);
+        PyErr_Format(PyExc_Exception, "UHD returned %s", uhd_error_string);
+        return false;
+    }
+}
+
+
 typedef struct {
     PyObject_HEAD
     /* Type-specific fields go here. */
@@ -169,11 +183,15 @@ Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
         self->number_tx_streams = 0;
 
         // TODO: handle the errors
-        uhd_error uhd_errno;
-        uhd_errno = uhd_rx_streamer_make(self->rx_streamer);
-        uhd_errno = uhd_rx_metadata_make(self->rx_metadata);
-        uhd_errno = uhd_tx_streamer_make(self->tx_streamer);
-        //uhd_errno = uhd_tx_metadata_make(self->tx_metadata);
+        if (!uhd_ok(uhd_rx_streamer_make(self->rx_streamer))) {
+            return NULL;
+        }
+        if (!uhd_ok(uhd_rx_metadata_make(self->rx_metadata))) {
+            return NULL;
+        }
+        if (!uhd_tx_streamer_make(self->tx_streamer)) {
+            return NULL;
+        }
     } else {
         /*
          * I'm not sure how this would happen, but something is horribly wrong.
@@ -231,19 +249,9 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         strcat(device_args, typestring);
     }
 
-    printf("Opening USRP with args: \"%s\"\n", device_args);
-    fflush(stdout);
-
-    uhd_errno = uhd_usrp_make(self->usrp_object, device_args);
-    if (uhd_errno != UHD_ERROR_NONE) {
-        char uhd_error_string[8192];
-        uhd_get_last_error(uhd_error_string, 8192);
-        PyErr_Format(PyExc_Exception, "UHD returned %s", uhd_error_string);
+    if (!uhd_errno = uhd_usrp_make(self->usrp_object, device_args)) {
         return -1;
     }
-    size_t nmboards;
-    uhd_usrp_get_num_mboards(*self->usrp_object, &nmboards);
-    printf("%lu mboards present\n", nmboards);
 
     // Ideally interrogate the device to create an internal dict of channels/subdevs
     char usrp_pp[2048];
@@ -306,8 +314,8 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
                 }
             } /* Parsing provided config dict */
         } else {
-            puts ("streams argument needs to be a dict of form"
-                            "    {'<DB>:<SUBDEV>': {'mode': 'RX'|'TX', 'frequency': double, 'rate': double, 'gain': double},\n");
+            PyErr_SetString(PyExc_TypeError, "streams argument needs to be a dict of form"
+                            "    {'<DB>:<SUBDEV>': {'mode': 'RX'|'TX', 'frequency': double, 'rate': double, 'gain': double},}");
         }
     } else {
         // We didn't get a config dict, so default to create 1 RX stream
