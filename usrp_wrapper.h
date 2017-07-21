@@ -180,6 +180,7 @@ Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
          * The python Noddy example does this check though...
          */
         puts("Usrp.__new__ failed\n");
+        return NULL;
     }
 
     return (PyObject *) self;
@@ -234,6 +235,12 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     fflush(stdout);
 
     uhd_errno = uhd_usrp_make(self->usrp_object, device_args);
+    if (uhd_errno != UHD_ERROR_NONE) {
+        char uhd_error_string[8192];
+        uhd_get_last_error(uhd_error_string, 8192);
+        PyErr_Format(PyExc_Exception, "UHD returned %s", uhd_error_string);
+        return -1;
+    }
     size_t nmboards;
     uhd_usrp_get_num_mboards(*self->usrp_object, &nmboards);
     printf("%lu mboards present\n", nmboards);
