@@ -5,7 +5,12 @@ This is a C python extension that wraps UHD in a friendly way. The goal here is 
 
 ## Building
 
-You need python (currently I don't do much cmake-fu to detect python versions, so only 2 works), numpy, and UHD. You build like any other cmake project.
+You need python (currently I don't do much cmake-fu to detect python versions, so only 2 works), numpy, and UHD. You build like any other cmake project:
+
+1. `git clone` `mkdir build` `cd build`
+2. `cmake -DCMAKE_INSTALL_PREFIX=~/apps/target-4-5-17 ../` replace ~/apps/target-4-5-17 with your PyBOMBS target directory
+3. `make`
+4. `sudo make install`
 
 ## Status
 
