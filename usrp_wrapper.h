@@ -189,8 +189,8 @@ Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
         if (!uhd_ok(uhd_rx_metadata_make(self->rx_metadata))) {
             return NULL;
         }
-        if (!uhd_tx_streamer_make(self->tx_streamer)) {
-            //return NULL;
+        if (!uhd_ok(uhd_tx_streamer_make(self->tx_streamer))) {
+            return NULL;
         }
     } else {
         /*
@@ -249,7 +249,9 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         strcat(device_args, typestring);
     }
 
-    uhd_usrp_make(self->usrp_object, device_args);
+    if (!uhd_ok(uhd_usrp_make(self->usrp_object, device_args))) {
+        return -1;
+    }
 
     // Ideally interrogate the device to create an internal dict of channels/subdevs
     char usrp_pp[2048];
