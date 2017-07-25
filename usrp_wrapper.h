@@ -30,6 +30,12 @@
 
 #define MIN(x,y) x < y ? x : y
 
+#if PY_MAJOR_VERSION >= 3
+#define PYSTRING_ASSTRING(x) PyBytes_AS_STRING(PyUnicode_AsEncodedString(x, "ASCII", "strict"))
+#else
+#define PYSTRING_ASSTRING(x) PyString_AsString(x)
+#endif
+
 typedef enum {
     OFF,
     TX_STREAM,
@@ -42,13 +48,13 @@ stream_mode_t convert_string_to_stream_mode_t(PyObject *string_mode) {
     stream_mode_t mode = RX_STREAM; /* default to RX streaming */
     puts("made it to convert\n");
     fflush(stdout);
-    if (string_mode != NULL && PyString_CheckExact(string_mode)) {
-        size_t compare_length = (size_t) PyString_Size(string_mode);
-        if (strncmp("TX\0", PyString_AsString(string_mode), MIN(compare_length, 2)) == 0) {
+    if (string_mode != NULL && PyBytes_CheckExact(string_mode)) {
+        size_t compare_length = (size_t) PyBytes_Size(string_mode);
+        if (strncmp("TX\0", PYSTRING_ASSTRING(string_mode), MIN(compare_length, 2)) == 0) {
             mode = TX_STREAM;
-        } else if (strncmp("RX\0", PyString_AsString(string_mode), MIN(compare_length, 2)) == 0) {
+        } else if (strncmp("RX\0", PYSTRING_ASSTRING(string_mode), MIN(compare_length, 2)) == 0) {
             mode = RX_STREAM;
-        } else if (strncmp("OFF\0", PyString_AsString(string_mode), MIN(compare_length, 3)) == 0) {
+        } else if (strncmp("OFF\0", PYSTRING_ASSTRING(string_mode), MIN(compare_length, 3)) == 0) {
             mode = OFF;
         }
     } else {
@@ -230,12 +236,12 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         Py_INCREF(addr);
         self->addr = addr;
         Py_XDECREF(tmp);
-        snprintf(device_args, 18, "addr=%s,", PyString_AsString(addr));
+        snprintf(device_args, 18, "addr=%s,", PYSTRING_ASSTRING(addr));
     }
     if (addr2) {
         // Erg. what to do about the internal addr we keep around....
         char addr2string[64] = {'\0'}; // we could check the length of the python string
-        snprintf(addr2string, 18, "second_addr=%s,", PyString_AsString(addr2));
+        snprintf(addr2string, 18, "second_addr=%s,", PYSTRING_ASSTRING(addr2));
         strcat(device_args, addr2string);
     }
 
@@ -245,7 +251,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         self->usrp_type = usrp_type;
         Py_XDECREF(tmp);
         char typestring[64]; // we could check the length of the python string
-        snprintf(typestring, 64, "type=%s", PyString_AsString(usrp_type));
+        snprintf(typestring, 64, "type=%s", PYSTRING_ASSTRING(usrp_type));
         strcat(device_args, typestring);
     }
 
@@ -275,7 +281,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
                 stream_config_t this_subdev;
                 PyObject *value;
 
-                strncpy(this_subdev.subdev, PyString_AsString(subdev), 6);
+                strncpy(this_subdev.subdev, PYSTRING_ASSTRING(subdev), 6);
                 const char mode_key[] = "mode";
                 value = PyDict_GetItemString(config, mode_key);
                 this_subdev.mode = convert_string_to_stream_mode_t(value);
@@ -439,7 +445,7 @@ Usrp_recv(Usrp *self)
 
     uhd_errno = uhd_rx_metadata_time_spec(*self->rx_metadata, &full_secs, &frac_secs);
     PyObject *metadata = PyTuple_New(2);
-    PyTuple_SET_ITEM(metadata, 0, PyInt_FromSize_t(full_secs));
+    PyTuple_SET_ITEM(metadata, 0, PyLong_FromSize_t(full_secs));
     PyTuple_SET_ITEM(metadata, 1, PyFloat_FromDouble(frac_secs));
 
     npy_intp shape[2];
@@ -470,7 +476,7 @@ Usrp_sensor_names(Usrp *self)
     for (unsigned int ii=0; ii < number_sensors; ++ii) {
         char sensor_name[64];
         uhd_errno = uhd_string_vector_at(sensor_names, ii, sensor_name, 64);
-        PyList_Append(sensor_names_list, PyString_FromString(sensor_name));
+        PyList_Append(sensor_names_list, PyBytes_FromString(sensor_name));
     }
     uhd_errno = uhd_string_vector_free(&sensor_names);
     return sensor_names_list;
@@ -496,7 +502,7 @@ Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds)
     uhd_error uhd_errno;
     uhd_sensor_value_handle sensor_value;
     uhd_sensor_value_make_from_string(&sensor_value, "w", "t", "f");
-    uhd_usrp_get_mboard_sensor(*self->usrp_object, PyString_AsString(sensor_string), 0, &sensor_value);
+    uhd_usrp_get_mboard_sensor(*self->usrp_object, PYSTRING_ASSTRING(sensor_string), 0, &sensor_value);
     uhd_sensor_value_data_type_t sensor_dtype;
     uhd_sensor_value_data_type(sensor_value, &sensor_dtype);
     PyObject *return_sensor_value;
@@ -512,7 +518,7 @@ Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds)
             break;
         case UHD_SENSOR_VALUE_INTEGER:
             uhd_sensor_value_to_int(sensor_value, &intval);
-            return_sensor_value = PyInt_FromLong(intval);
+            return_sensor_value = PyLong_FromLong(intval);
             break;
         case UHD_SENSOR_VALUE_REALNUM:
             uhd_sensor_value_to_realnum(sensor_value, &doubleval);
@@ -520,7 +526,7 @@ Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds)
             break;
         case UHD_SENSOR_VALUE_STRING:
             uhd_sensor_value_to_pp_string(sensor_value, charval, 4096);
-            return_sensor_value = PyString_FromString(charval);
+            return_sensor_value = PyBytes_FromString(charval);
             break;
         default:
             return_sensor_value = Py_None;
@@ -569,16 +575,16 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
 
     // We'll use the raw string value in 2 places, so just fetch it now
     char *when_data = NULL;
-    if (when != NULL && PyString_Check(when)) {
-        when_data = PyString_AsString(when);
+    if (when != NULL && PyBytes_Check(when)) {
+        when_data = PYSTRING_ASSTRING(when);
     }
 
     int full_secs = 0;
     double fractional_secs = 0.0;
 
     if (time != NULL) {
-        if (PyString_Check(time)) { /* if we got a string it should say gps */
-            if (strncmp(PyString_AsString(time), "gps", MIN((size_t) PyString_Size(time), 3))) {
+        if (PyBytes_Check(time)) { /* if we got a string it should say gps */
+            if (strncmp(PYSTRING_ASSTRING(time), "gps", MIN((size_t) PyBytes_Size(time), 3))) {
                 // we want to set the time next pps to whatever the gpsdo is
                 uhd_sensor_value_handle sensor_value;
                 uhd_sensor_value_make_from_string(&sensor_value, "w", "t", "f");
@@ -588,7 +594,7 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
                     uhd_sensor_value_data_type(sensor_value, &sensor_dtype);
                     full_secs = uhd_sensor_value_to_int(sensor_value, &full_secs);
                 }
-            } else if (strncmp(PyString_AsString(time), "pc", MIN((size_t) PyString_Size(time), 2))) {
+            } else if (strncmp(PYSTRING_ASSTRING(time), "pc", MIN((size_t) PyBytes_Size(time), 2))) {
                 struct timeval tv;
                 gettimeofday(&tv, NULL);
                 full_secs = (int)tv.tv_sec;
@@ -602,8 +608,8 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
             }
         }
         else if (PyTuple_Check(time) && PyTuple_Size(time)==2) { /* if we got a tuple, then it's whole secs, fractional secs. a very sexy time */
-            full_secs = (int) PyInt_AsLong(PyTuple_GetItem(time, 0));
-            fractional_secs = PyInt_AsLong(PyTuple_GetItem(time, 1));
+            full_secs = (int) PyLong_AsLong(PyTuple_GetItem(time, 0));
+            fractional_secs = PyLong_AsLong(PyTuple_GetItem(time, 1));
         }
     }
 

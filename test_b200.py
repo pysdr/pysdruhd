@@ -1,6 +1,10 @@
+from __future__ import print_function
+
 import pysdruhd as uhd
 import matplotlib.pyplot as plt
 import numpy as np
+
+print("using pysdruhd located in", uhd.__file__)
 
 center_freq = 100e6
 samp_rate = 4e6
