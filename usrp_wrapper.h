@@ -267,7 +267,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
      * How friendly of me...
      */
     if (streams_dict) {
-        /* DEV HELPER */ printf("checking streams\n");
         if (PyDict_Check(streams_dict)) {
             PyObject *subdev, *config;
             Py_ssize_t position = 0;
@@ -652,6 +651,68 @@ Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds)
     uhd_error uhd_errno = uhd_rx_streamer_issue_stream_cmd(*self->rx_streamer, &stream_cmd);
 
     return Py_None;
+}
+
+
+static const char set_frequency_docstring[] =
+        "set_frequency(subdev, center_frequency=900e6, offset=0)\n\n"
+                "    set_frequency tunes the provided subdev to with a frequency spec. The spec can either be floating"
+                " point type parameters with kwargs center_frequency and offset, or a tuple with"
+                " (center_frequency, offset). The return value is the actual value that was tuned to.";
+static PyObject *
+Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds)
+{
+    double frequency = 900e6;
+    double offset = 0.0;
+    PyObject *frequency_tuple;
+    char *subdev = NULL;
+
+    static char *kwlist[] = {"subdev", "center_frequency", "offset", "frequency_spec", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ddO", kwlist,
+                                     &subdev, &frequency, &offset, &frequency_tuple
+    )) {
+        return NULL;
+    }
+
+    // what if we get a tx subdev?
+    int rx_stream_index = 0; /* actually need to find which channel number this is based on subdev string */
+    for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
+        if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
+            rx_stream_index = ii;
+            break;
+        }
+    }
+    int channel = rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
+
+    if (frequency_tuple != NULL && PyTuple_Check(frequency_tuple)) {
+        if (PyTuple_Size(frequency_tuple) == 2) {
+            frequency = PyFloat_AsDouble(PyTuple_GetItem(frequency_tuple, 0));
+            offset = PyFloat_AsDouble(PyTuple_GetItem(frequency_tuple, 1));
+        } else {
+            PyErr_SetString(PyExc_TypeError, "Usrp.set_frequency(frequency_tuple) was provided a tuple with the wrong "
+                    "number of items. Two items (center frequency, offset) are required");
+            return NULL;
+        }
+    }
+
+    // From uhd/host/lib/types/tune.cpp, for no offset tuning you can set UHD_TUNE_REQUEST_POLICY_AUTO
+    // but I don't know of any reason to just provide a default 0.0 offset and always do manual (which avoids forks!)
+    uhd_tune_request_t tune_request = {
+            .target_freq = frequency,
+            .rf_freq_policy = UHD_TUNE_REQUEST_POLICY_MANUAL,
+            .rf_freq = frequency + offset,
+            .dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO,
+            .dsp_freq = 0.0,
+    };
+    double checkval;
+    uhd_tune_result_t tune_result;
+    uhd_error uhd_errno;
+    uhd_errno = uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, channel, &tune_result);
+    uhd_errno = uhd_usrp_get_rx_freq(*self->usrp_object, channel, &checkval);
+    self->rx_streams[rx_stream_index].frequency = frequency;
+    frequency = tune_result.actual_rf_freq;
+    return PyFloat_FromDouble(frequency);
 }
 
 
