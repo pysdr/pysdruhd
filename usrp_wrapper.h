@@ -31,273 +31,6 @@
 #include <sys/time.h>
 
 
-static void
-Usrp_dealloc(Usrp *self) {
-    printf("deallocing usrp\n");
-    Py_XDECREF(self->addr);
-    Py_XDECREF(self->usrp_type);
-
-    if (self->rx_streamer != NULL) {
-        uhd_rx_streamer_free(self->rx_streamer);
-        free(self->rx_streamer);
-        self->rx_streamer = NULL;
-    }
-
-    if (self->rx_metadata != NULL) {
-        uhd_rx_metadata_free(self->rx_metadata);
-        free(self->rx_metadata);
-        self->rx_metadata = NULL;
-    }
-
-    if (self->tx_streamer != NULL) {
-        uhd_tx_streamer_free(self->tx_streamer);
-        free(self->tx_streamer);
-        self->tx_streamer = NULL;
-    }
-
-    if (self->usrp_object != NULL) {
-        uhd_usrp_free(self->usrp_object);
-        free(self->usrp_object);
-        self->usrp_object = NULL;
-    }
-
-    if (self->rx_streams != NULL) {
-        free(self->rx_streams);
-        self->rx_streams = NULL;
-    }
-
-    if (self->tx_streams != NULL) {
-        free(self->tx_streams);
-        self->tx_streams = NULL;
-    }
-
-    if (self->recv_buffers != NULL) {
-        free(self->recv_buffers);
-        self->recv_buffers = NULL;
-    }
-
-    if (self->recv_buffers_ptr != NULL) {
-        free(self->recv_buffers_ptr);
-        self->recv_buffers_ptr = NULL;
-    }
-
-    Py_TYPE(self)->tp_free((PyObject *) self);
-}
-
-/*
- * NB: new is only ever called once. init can be called any number of times
- */
-static PyObject *
-Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    Usrp *self = (Usrp *) type->tp_alloc(type, 0);
-
-    if (self != NULL) {
-        self->addr = NULL;
-        self->usrp_type = NULL;
-
-        self->samples_per_buffer = 0;
-        self->recv_buffers_ptr = NULL;
-        self->recv_buffers = NULL;
-
-        self->usrp_object = malloc(sizeof(uhd_usrp_handle));
-
-        self->rx_streamer = malloc(sizeof(uhd_rx_streamer_handle));
-        self->rx_metadata = malloc(sizeof(uhd_rx_metadata_handle));
-        self->number_rx_streams = 0;
-
-        self->tx_streamer = malloc(sizeof(uhd_tx_streamer_handle));
-        //self->tx_metadata = malloc(sizeof(uhd_tx_metadata_handle));
-        self->number_tx_streams = 0;
-
-        // TODO: handle the errors
-        if (!uhd_ok(uhd_rx_streamer_make(self->rx_streamer))) {
-            return NULL;
-        }
-        if (!uhd_ok(uhd_rx_metadata_make(self->rx_metadata))) {
-            return NULL;
-        }
-        if (!uhd_ok(uhd_tx_streamer_make(self->tx_streamer))) {
-            return NULL;
-        }
-    } else {
-        /*
-         * I'm not sure how this would happen, but something is horribly wrong.
-         * The python Noddy example does this check though...
-         */
-        PyErr_BadArgument();
-        return NULL;
-    }
-
-    return (PyObject *) self;
-}
-
-
-static int
-Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
-    PyObject *addr = NULL, *addr2 = NULL, *tmp = NULL;
-    PyObject *usrp_type = NULL;
-    PyObject *streams_dict = NULL;
-    double frequency_param = 910e6;
-    double rate_param = 1e6;
-    double gain_param = 0;
-
-    static char *kwlist[] = {"addr", "addr2", "type", "streams", "frequency", "rate", "gain", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OOOOddd", kwlist,
-                                     &addr, &addr2, &usrp_type, &streams_dict, &frequency_param, &rate_param,
-                                     &gain_param
-    )) {
-        return -1;
-    }
-
-    uhd_error uhd_errno;
-    char *device_args = malloc(40);
-    memset(device_args, 0x0, 40);
-    if (addr) {
-        tmp = self->addr;
-        Py_INCREF(addr);
-        self->addr = addr;
-        Py_XDECREF(tmp);
-        snprintf(device_args, 18, "addr=%s,", PyString_AsString(addr));
-    }
-    if (addr2) {
-        // Erg. what to do about the internal addr we keep around....
-        char addr2string[64] = {'\0'}; // we could check the length of the python string
-        snprintf(addr2string, 18, "second_addr=%s,", PyString_AsString(addr2));
-        strcat(device_args, addr2string);
-    }
-
-    if (usrp_type) {
-        tmp = self->usrp_type;
-        Py_INCREF(usrp_type);
-        self->usrp_type = usrp_type;
-        Py_XDECREF(tmp);
-        char typestring[64]; // we could check the length of the python string
-        snprintf(typestring, 64, "type=%s", PyString_AsString(usrp_type));
-        strcat(device_args, typestring);
-    }
-
-    if (!uhd_ok(uhd_usrp_make(self->usrp_object, device_args))) {
-        return -1;
-    }
-
-    // Ideally interrogate the device to create an internal dict of channels/subdevs
-    char usrp_pp[2048];
-    uhd_usrp_get_pp_string(*self->usrp_object, usrp_pp, 2048);
-    /* DEV HELPER */ printf("usrp: %s\n", usrp_pp);
-
-    size_t channel[] = {0, 1, 2, 3};
-    char rx_subdev_spec_string[64] = {'\0'};
-
-    if (streams_dict) {
-        if (PyDict_Check(streams_dict)) {
-            parse_dict_to_streams_config(self, streams_dict, frequency_param, rate_param, gain_param,
-                                         rx_subdev_spec_string);
-        } else {
-            PyErr_SetString(PyExc_TypeError, "streams argument needs to be a dict of form"
-                    "    {'<DB>:<SUBDEV>': {'mode': 'RX'|'TX', 'frequency': double, 'rate': double, 'gain': double},}");
-        }
-    } else {
-        // We didn't get a config dict, so default to create 1 RX stream on A:0
-        self->rx_streams = malloc(sizeof(stream_config_t));
-        self->number_rx_streams = 1;
-        self->rx_streams[0].frequency = frequency_param;
-        self->rx_streams[0].rate = rate_param;
-        self->rx_streams[0].gain = gain_param;
-        strncpy(self->rx_streams[0].subdev, "A:0\0", 4);
-    }
-
-
-    // We should accept a stream_args dict
-    uhd_stream_args_t stream_args = {
-            .cpu_format = "fc32",
-            .otw_format = "sc16",
-            .args = "",
-            .channel_list = channel,
-            .n_channels = self->number_rx_streams
-    };
-    /* This should really be made adjustable, which would make this wrapper probably
-     * the only place that this is an easy way to get streaming started at a time
-     * that you care about
-     */
-    uhd_stream_cmd_t stream_cmd = {
-            .stream_mode = UHD_STREAM_MODE_START_CONTINUOUS,
-            .stream_now = true,
-            //.time_spec_full_secs = 1,
-            //.time_spec_frac_secs= 0.,
-    };
-    double checkval;
-
-
-    char rx_antennas[8][4] = {"RX1", "RX2", "RX1",
-                              "RX2"}; // This unfortunately needs to be in the dict. It could be different for TWINRX, basicrx, and a every other card
-    uhd_subdev_spec_handle subdev_spec;
-    printf("subdev spec string: %s\n", rx_subdev_spec_string);
-    uhd_subdev_spec_make(&subdev_spec, rx_subdev_spec_string);
-    uhd_usrp_set_rx_subdev_spec(*self->usrp_object, subdev_spec, 0);
-
-    for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
-        printf("setting up rx stream %lu\n", rx_stream_index);
-        uhd_usrp_set_rx_antenna(*self->usrp_object, rx_antennas[rx_stream_index], channel[rx_stream_index]);
-        uhd_errno = uhd_usrp_set_rx_rate(*self->usrp_object, self->rx_streams[rx_stream_index].rate,
-                                         channel[rx_stream_index]);
-        uhd_errno = uhd_usrp_get_rx_rate(*self->usrp_object, channel[rx_stream_index], &checkval);
-        rate_param = checkval;
-
-        uhd_errno = uhd_usrp_set_rx_gain(*self->usrp_object, self->rx_streams[rx_stream_index].gain,
-                                         channel[rx_stream_index], "");
-        uhd_errno = uhd_usrp_get_rx_gain(*self->usrp_object, channel[rx_stream_index], "", &checkval);
-        gain_param = checkval;
-
-        // definitely want to support offset tuning....
-        uhd_tune_request_t tune_request = {
-                .target_freq = self->rx_streams[rx_stream_index].frequency,
-                .rf_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO,
-                .dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO,
-        };
-        uhd_tune_result_t tune_result;
-        if (!uhd_ok(uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, channel[rx_stream_index], &tune_result))) {
-            return -1;
-        }
-        if (!uhd_ok(uhd_usrp_get_rx_freq(*self->usrp_object, channel[rx_stream_index], &checkval))) {
-            return -1;
-        }
-        frequency_param = tune_result.actual_rf_freq;
-    }
-    if (self->number_rx_streams > 0) {
-        puts("make the stremer object\n");
-        if (!uhd_ok(uhd_usrp_get_rx_stream(*self->usrp_object, &stream_args, *self->rx_streamer))) {
-            return -1;
-        }
-
-        if (!uhd_ok(uhd_rx_streamer_max_num_samps(*self->rx_streamer, &self->samples_per_buffer))) {
-            return -1;
-        }
-
-        size_t buffer_size_per_channel = self->samples_per_buffer * 2 * sizeof(float);
-        self->recv_buffers = malloc(self->number_rx_streams * buffer_size_per_channel);
-        self->recv_buffers_ptr = malloc(sizeof(void *) * self->number_rx_streams);
-        // watch out world, we're indexing void* 's!
-        for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
-            self->recv_buffers_ptr[rx_stream_index] = self->recv_buffers + (rx_stream_index * buffer_size_per_channel);
-        }
-    }
-    uhd_subdev_spec_free(&subdev_spec);
-
-
-    for (size_t tx_stream_index = 0; tx_stream_index < self->number_tx_streams; ++tx_stream_index) {
-        // TODO: set up tx streams
-    }
-    puts("done initing\n");
-    fflush(stdout);
-
-    free(device_args);
-    if (uhd_errno == UHD_ERROR_NONE) {
-        return 0;
-    } else {
-        return -1; // TODO: properly return a python error with the UHD error string
-    }
-}
 
 
 static PyMemberDef Usrp_members[] = {
@@ -366,6 +99,7 @@ static const char get_sensor_docstring[] =
                 "   returns the value of a sensor with name matching the string sensorname. The datatype of a sensor value is "
                 "dependent on the sensor";
 
+
 static PyObject *
 Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds) {
 
@@ -377,7 +111,7 @@ Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds) {
     )) {
         return NULL;
     }
-    uhd_error uhd_errno;
+
     uhd_sensor_value_handle sensor_value;
     uhd_sensor_value_make_from_string(&sensor_value, "w", "t", "f");
     uhd_usrp_get_mboard_sensor(*self->usrp_object, PyString_AsString(sensor_string), 0, &sensor_value);
@@ -649,6 +383,9 @@ static const char set_rate_docstring[] =
 
 static PyObject *
 Usrp_set_rate(Usrp *self, PyObject *args, PyObject *kwds) {
+    printf("ARGS:   %s\n", PyString_AsString(PyObject_Repr(args)));
+    printf("KWS:   %s\n", PyString_AsString(PyObject_Repr(kwds)));
+
     double rate = 1.0;
     char *subdev = NULL;
 
@@ -659,7 +396,8 @@ Usrp_set_rate(Usrp *self, PyObject *args, PyObject *kwds) {
     )) {
         return NULL;
     }
-
+    printf("subdev: %s  setting rate to %F\n", subdev, rate);
+    fflush(stdout);
     // what if we get a tx subdev?
     int rx_stream_index = 0;
     for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
@@ -729,6 +467,256 @@ static const char Usrp_docstring[] =
                 "\n"
                 "Until then, this is missing some more advances features and is crash-prone when things aren't butterflies and \n"
                 "rainbows, but is at least capable of streaming 200 Msps in to python with no overhead.";
+
+
+static void
+Usrp_dealloc(Usrp *self) {
+    printf("deallocing usrp\n");
+    Py_XDECREF(self->addr);
+    Py_XDECREF(self->usrp_type);
+
+    if (self->rx_streamer != NULL) {
+        uhd_rx_streamer_free(self->rx_streamer);
+        free(self->rx_streamer);
+        self->rx_streamer = NULL;
+    }
+
+    if (self->rx_metadata != NULL) {
+        uhd_rx_metadata_free(self->rx_metadata);
+        free(self->rx_metadata);
+        self->rx_metadata = NULL;
+    }
+
+    if (self->tx_streamer != NULL) {
+        uhd_tx_streamer_free(self->tx_streamer);
+        free(self->tx_streamer);
+        self->tx_streamer = NULL;
+    }
+
+    if (self->usrp_object != NULL) {
+        uhd_usrp_free(self->usrp_object);
+        free(self->usrp_object);
+        self->usrp_object = NULL;
+    }
+
+    if (self->rx_streams != NULL) {
+        free(self->rx_streams);
+        self->rx_streams = NULL;
+    }
+
+    if (self->tx_streams != NULL) {
+        free(self->tx_streams);
+        self->tx_streams = NULL;
+    }
+
+    if (self->recv_buffers != NULL) {
+        free(self->recv_buffers);
+        self->recv_buffers = NULL;
+    }
+
+    if (self->recv_buffers_ptr != NULL) {
+        free(self->recv_buffers_ptr);
+        self->recv_buffers_ptr = NULL;
+    }
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+/*
+ * NB: new is only ever called once. init can be called any number of times
+ */
+static PyObject *
+Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    Usrp *self = (Usrp *) type->tp_alloc(type, 0);
+
+    if (self != NULL) {
+        self->addr = NULL;
+        self->usrp_type = NULL;
+
+        self->samples_per_buffer = 0;
+        self->recv_buffers_ptr = NULL;
+        self->recv_buffers = NULL;
+
+        self->usrp_object = malloc(sizeof(uhd_usrp_handle));
+
+        self->rx_streamer = malloc(sizeof(uhd_rx_streamer_handle));
+        self->rx_metadata = malloc(sizeof(uhd_rx_metadata_handle));
+        self->number_rx_streams = 0;
+
+        self->tx_streamer = malloc(sizeof(uhd_tx_streamer_handle));
+        //self->tx_metadata = malloc(sizeof(uhd_tx_metadata_handle));
+        self->number_tx_streams = 0;
+
+        // TODO: handle the errors
+        if (!uhd_ok(uhd_rx_streamer_make(self->rx_streamer))) {
+            return NULL;
+        }
+        if (!uhd_ok(uhd_rx_metadata_make(self->rx_metadata))) {
+            return NULL;
+        }
+        if (!uhd_ok(uhd_tx_streamer_make(self->tx_streamer))) {
+            return NULL;
+        }
+    } else {
+        /*
+         * I'm not sure how this would happen, but something is horribly wrong.
+         * The python Noddy example does this check though...
+         */
+        PyErr_BadArgument();
+        return NULL;
+    }
+
+    return (PyObject *) self;
+}
+
+
+static int
+Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
+    PyObject *addr = NULL, *addr2 = NULL, *tmp = NULL;
+    PyObject *usrp_type = NULL;
+    PyObject *streams_dict = NULL;
+    double frequency_param = 910e6;
+    double lo_offset_param = 0.0;
+    double rate_param = 1e6;
+    double gain_param = 0;
+
+    static char *kwlist[] = {"addr", "addr2", "type", "streams", "frequency", "lo_offset", "rate", "gain", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OOOOdddd", kwlist,
+                                     &addr, &addr2, &usrp_type, &streams_dict, &frequency_param, &lo_offset_param,
+                                     &rate_param, &gain_param
+    )) {
+        return -1;
+    }
+
+    uhd_error uhd_errno;
+    char *device_args = malloc(40);
+    memset(device_args, 0x0, 40);
+    if (addr) {
+        tmp = self->addr;
+        Py_INCREF(addr);
+        self->addr = addr;
+        Py_XDECREF(tmp);
+        snprintf(device_args, 18, "addr=%s,", PyString_AsString(addr));
+    }
+    if (addr2) {
+        // Erg. what to do about the internal addr we keep around....
+        char addr2string[64] = {'\0'}; // we could check the length of the python string
+        snprintf(addr2string, 18, "second_addr=%s,", PyString_AsString(addr2));
+        strcat(device_args, addr2string);
+    }
+
+    if (usrp_type) {
+        tmp = self->usrp_type;
+        Py_INCREF(usrp_type);
+        self->usrp_type = usrp_type;
+        Py_XDECREF(tmp);
+        char typestring[64]; // we could check the length of the python string
+        snprintf(typestring, 64, "type=%s", PyString_AsString(usrp_type));
+        strcat(device_args, typestring);
+    }
+
+    if (!uhd_ok(uhd_usrp_make(self->usrp_object, device_args))) {
+        return -1;
+    }
+
+    // Ideally interrogate the device to create an internal dict of channels/subdevs
+    char usrp_pp[2048];
+    uhd_usrp_get_pp_string(*self->usrp_object, usrp_pp, 2048);
+    /* DEV HELPER */ printf("usrp: %s\n", usrp_pp);
+
+    size_t channel[] = {0, 1, 2, 3};
+    char rx_subdev_spec_string[64] = {'\0'};
+
+    if (streams_dict) {
+        if (PyDict_Check(streams_dict)) {
+            parse_dict_to_streams_config(self, streams_dict, frequency_param, rate_param, gain_param,
+                                         rx_subdev_spec_string);
+        } else {
+            PyErr_SetString(PyExc_TypeError, "streams argument needs to be a dict of form"
+                    "    {'<DB>:<SUBDEV>': {'mode': 'RX'|'TX', 'frequency': double, 'rate': double, 'gain': double},}");
+        }
+    } else {
+        // We didn't get a config dict, so default to create 1 RX stream on A:0
+        self->rx_streams = malloc(sizeof(stream_config_t));
+        self->number_rx_streams = 1;
+        self->rx_streams[0].lo_offset = lo_offset_param;
+        self->rx_streams[0].frequency = frequency_param;
+        self->rx_streams[0].rate = rate_param;
+        self->rx_streams[0].gain = gain_param;
+        strncpy(self->rx_streams[0].subdev, "A:0\0", 4);
+    }
+
+    // We should accept a stream_args dict
+    uhd_stream_args_t stream_args = {
+            .cpu_format = "fc32",
+            .otw_format = "sc16",
+            .args = "",
+            .channel_list = channel,
+            .n_channels = self->number_rx_streams
+    };
+
+    char rx_antennas[8][4] = {"RX1", "RX2", "RX1",
+                              "RX2"};
+    uhd_subdev_spec_handle subdev_spec;
+    printf("subdev spec string: %s\n", rx_subdev_spec_string);
+    uhd_subdev_spec_make(&subdev_spec, rx_subdev_spec_string);
+    uhd_usrp_set_rx_subdev_spec(*self->usrp_object, subdev_spec, 0);
+
+    for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
+        printf("setting up rx stream %lu\n", rx_stream_index);
+        if (!uhd_ok(uhd_usrp_set_rx_antenna(*self->usrp_object,
+                                            self->rx_streams[rx_stream_index].antenna,
+                                            channel[rx_stream_index]) )) {
+            return -1;
+        }
+
+        PyObject *empty_arg = PyTuple_New(0);
+        PyObject *rate_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->rx_streams[rx_stream_index].subdev,
+                                           "rate", self->rx_streams[rx_stream_index].rate);
+        Usrp_set_rate(self, empty_arg, rate_kws);
+
+        PyObject *gain_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->rx_streams[rx_stream_index].subdev,
+                                           "gain", self->rx_streams[rx_stream_index].gain);
+        Usrp_set_gain(self, empty_arg, gain_kws);
+
+        PyObject *freq_kws = Py_BuildValue("{s:s,s:d,s:d}", "subdev", self->rx_streams[rx_stream_index].subdev,
+                                           "center_frequency", self->rx_streams[rx_stream_index].frequency,
+                                           "offset", self->rx_streams[rx_stream_index].lo_offset);
+        Usrp_set_frequency(self, empty_arg, freq_kws);
+    }
+    if (self->number_rx_streams > 0) {
+        puts("make the stremer object\n");
+        if (!uhd_ok(uhd_usrp_get_rx_stream(*self->usrp_object, &stream_args, *self->rx_streamer))) {
+            return -1;
+        }
+
+        if (!uhd_ok(uhd_rx_streamer_max_num_samps(*self->rx_streamer, &self->samples_per_buffer))) {
+            return -1;
+        }
+
+        size_t buffer_size_per_channel = self->samples_per_buffer * 2 * sizeof(float);
+        self->recv_buffers = malloc(self->number_rx_streams * buffer_size_per_channel);
+        self->recv_buffers_ptr = malloc(sizeof(void *) * self->number_rx_streams);
+        // watch out world, we're indexing void* 's!
+        for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
+            self->recv_buffers_ptr[rx_stream_index] = self->recv_buffers + (rx_stream_index * buffer_size_per_channel);
+        }
+    }
+    if (!uhd_ok( uhd_subdev_spec_free(&subdev_spec) )) {
+        return -1;
+    }
+
+
+    for (size_t tx_stream_index = 0; tx_stream_index < self->number_tx_streams; ++tx_stream_index) {
+        // TODO: set up tx streams
+    }
+    puts("done initing\n");
+    fflush(stdout);
+
+    free(device_args);
+    return 0;
+}
 
 
 static PyTypeObject UsrpType = {

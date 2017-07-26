@@ -3,6 +3,7 @@
 //
 
 #include "wrapper_helper.h"
+#include "usrp_object.h"
 
 stream_mode_t convert_string_to_stream_mode_t(PyObject *string_mode) {
     stream_mode_t mode = RX_STREAM; /* default to RX streaming */
@@ -39,9 +40,17 @@ void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double fre
         this_subdev.rate = rate_param;
         this_subdev.gain = gain_param;
 
+        value = PyDict_GetItemString(config, "antenna\0");
+        if (value != NULL) {
+            strncpy(this_subdev.antenna, PyString_AsString(value), 6);
+        }
         value = PyDict_GetItemString(config, "frequency\0");
         if (value != NULL) {
             this_subdev.frequency = PyFloat_AsDouble(value);
+        }
+        value = PyDict_GetItemString(config, "lo_offset\0");
+        if (value != NULL) {
+            this_subdev.lo_offset = PyFloat_AsDouble(value);
         }
         value = PyDict_GetItemString(config, "rate\0");
         if (value != NULL) {
