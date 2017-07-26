@@ -49,14 +49,17 @@ Usrp_recv(Usrp *self) {
     size_t rx_samples_count = 0;
     time_t full_secs = 0;
     double frac_secs = 0.;
-    uhd_error uhd_errno;
 
-    uhd_errno = uhd_rx_streamer_recv(*self->rx_streamer, self->recv_buffers_ptr, self->samples_per_buffer,
-                                     self->rx_metadata, 3.0, false, &rx_samples_count);
+    if (!uhd_ok( uhd_rx_streamer_recv(*self->rx_streamer, self->recv_buffers_ptr, self->samples_per_buffer,
+                                     self->rx_metadata, 3.0, false, &rx_samples_count) )) {
+        return NULL;
+    }
 
-    uhd_errno = uhd_rx_metadata_time_spec(*self->rx_metadata, &full_secs, &frac_secs);
+    if (!uhd_ok( uhd_rx_metadata_time_spec(*self->rx_metadata, &full_secs, &frac_secs) )) {
+        return NULL;
+    }
     PyObject *metadata = PyTuple_New(2);
-    PyTuple_SET_ITEM(metadata, 0, PyInt_FromSize_t(full_secs));
+    PyTuple_SET_ITEM(metadata, 0, PyInt_FromSize_t((size_t)full_secs));
     PyTuple_SET_ITEM(metadata, 1, PyFloat_FromDouble(frac_secs));
 
     npy_intp shape[2];
@@ -76,20 +79,27 @@ static const char sensor_names_docstring[] =
 
 static PyObject *
 Usrp_sensor_names(Usrp *self) {
-    uhd_error uhd_errno;
     uhd_string_vector_handle sensor_names;
     uhd_string_vector_make(&sensor_names);
-    uhd_errno = uhd_usrp_get_mboard_sensor_names(*self->usrp_object, 0, &sensor_names);
+    if (!uhd_ok( uhd_usrp_get_mboard_sensor_names(*self->usrp_object, 0, &sensor_names) )) {
+        return NULL;
+    }
     size_t number_sensors;
-    uhd_string_vector_size(sensor_names, &number_sensors);
+    if (!uhd_ok( uhd_string_vector_size(sensor_names, &number_sensors) )) {
+        return NULL;
+    }
     PyObject *sensor_names_list = PyList_New(0);
 
     for (unsigned int ii = 0; ii < number_sensors; ++ii) {
         char sensor_name[64];
-        uhd_errno = uhd_string_vector_at(sensor_names, ii, sensor_name, 64);
+        if (!uhd_ok( uhd_string_vector_at(sensor_names, ii, sensor_name, 64) )) {
+            return NULL;
+        }
         PyList_Append(sensor_names_list, PyString_FromString(sensor_name));
     }
-    uhd_errno = uhd_string_vector_free(&sensor_names);
+    if (!uhd_ok(uhd_string_vector_free(&sensor_names))) {
+        return NULL;
+    }
     return sensor_names_list;
 }
 
@@ -196,7 +206,7 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds) {
 
     if (time != NULL) {
         if (PyString_Check(time)) { /* if we got a string it should say gps */
-            if (strncmp(PyString_AsString(time), "gps", MIN((size_t) PyString_Size(time), 3))) {
+            if (strncmp(PyString_AsString(time), "gps", MIN((size_t) PyString_Size(time), 3)) == 0) {
                 // we want to set the time next pps to whatever the gpsdo is
                 uhd_sensor_value_handle sensor_value;
                 uhd_sensor_value_make_from_string(&sensor_value, "w", "t", "f");
@@ -206,7 +216,7 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds) {
                     uhd_sensor_value_data_type(sensor_value, &sensor_dtype);
                     full_secs = uhd_sensor_value_to_int(sensor_value, &full_secs);
                 }
-            } else if (strncmp(PyString_AsString(time), "pc", MIN((size_t) PyString_Size(time), 2))) {
+            } else if (strncmp(PyString_AsString(time), "pc", MIN((size_t) PyString_Size(time), 2)) == 0) {
                 struct timeval tv;
                 gettimeofday(&tv, NULL);
                 full_secs = (int) tv.tv_sec;
@@ -246,7 +256,7 @@ static const char send_stream_command_docstring[] =
                 "streamer a command that contains a `stream_mode` enum, `stream_now` bool, and optionall a timespec. This wrapper "
                 "accepts the mode as a string and when can either be a string matching 'now' or a tuple of (full secs, fractional "
                 "secs)";
-
+// Ooops! this isn't actually doing anything yet
 static PyObject *
 Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds) {
     PyObject *command;
@@ -265,9 +275,15 @@ Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds) {
             //.time_spec_full_secs = 1,
             //.time_spec_frac_secs= 0.,
     };
-    uhd_usrp_set_time_source(*self->usrp_object, "internal", 0);
-    uhd_usrp_set_time_now(*self->usrp_object, 0, 0.0, 0);
-    uhd_error uhd_errno = uhd_rx_streamer_issue_stream_cmd(*self->rx_streamer, &stream_cmd);
+    if (!uhd_ok( uhd_usrp_set_time_source(*self->usrp_object, "internal", 0) )) {
+        return NULL;
+    }
+    if (!uhd_ok( uhd_usrp_set_time_now(*self->usrp_object, 0, 0.0, 0) )) {
+        return NULL;
+    }
+    if (!uhd_ok( uhd_rx_streamer_issue_stream_cmd(*self->rx_streamer, &stream_cmd) )) {
+        return NULL;
+    }
 
     return Py_None;
 }
@@ -302,7 +318,7 @@ Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds) {
             break;
         }
     }
-    int channel = rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
+    size_t channel = (size_t) rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
 
     if (frequency_tuple != NULL && PyTuple_Check(frequency_tuple)) {
         if (PyTuple_Size(frequency_tuple) == 2) {
@@ -326,10 +342,14 @@ Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds) {
     };
     double checkval;
     uhd_tune_result_t tune_result;
-    uhd_error uhd_errno;
-    uhd_errno = uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, channel, &tune_result);
-    uhd_errno = uhd_usrp_get_rx_freq(*self->usrp_object, channel, &checkval);
+    if (!uhd_ok( uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, channel, &tune_result) )) {
+        return NULL;
+    }
+    if (!uhd_ok( uhd_usrp_get_rx_freq(*self->usrp_object, channel, &checkval) )) {
+        return NULL;
+    }
     self->rx_streams[rx_stream_index].frequency = frequency;
+    self->rx_streams[rx_stream_index].lo_offset = offset;
     frequency = tune_result.actual_rf_freq;
     return PyFloat_FromDouble(frequency);
 }
@@ -363,13 +383,13 @@ Usrp_set_gain(Usrp *self, PyObject *args, PyObject *kwds) {
             break;
         }
     }
-    int channel = rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
+    size_t channel = (size_t) rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
 
     double checkval;
-    if (!uhd_ok(uhd_usrp_set_normalized_rx_gain(*self->usrp_object, gain, channel))) {
+    if (!uhd_ok(uhd_usrp_set_normalized_rx_gain(*self->usrp_object, gain, (size_t) channel))) {
         return NULL;
     }
-    if (!uhd_ok(uhd_usrp_get_normalized_rx_gain(*self->usrp_object, channel, &checkval))) {
+    if (!uhd_ok(uhd_usrp_get_normalized_rx_gain(*self->usrp_object, (size_t) channel, &checkval))) {
         return NULL;
     }
     return PyFloat_FromDouble(checkval);
@@ -406,14 +426,13 @@ Usrp_set_rate(Usrp *self, PyObject *args, PyObject *kwds) {
             break;
         }
     }
-    int channel = rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
 
     double checkval;
     if (!uhd_ok(uhd_usrp_set_rx_rate(*self->usrp_object, self->rx_streams[rx_stream_index].rate,
-                                     rx_stream_index))) {
+                                     (size_t) rx_stream_index))) {
         return NULL;
     }
-    if (!uhd_ok(uhd_usrp_get_rx_rate(*self->usrp_object, rx_stream_index, &checkval))) {
+    if (!uhd_ok(uhd_usrp_get_rx_rate(*self->usrp_object, (size_t) rx_stream_index, &checkval))) {
         return NULL;
     }
     return PyFloat_FromDouble(checkval);
@@ -547,7 +566,6 @@ Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
         //self->tx_metadata = malloc(sizeof(uhd_tx_metadata_handle));
         self->number_tx_streams = 0;
 
-        // TODO: handle the errors
         if (!uhd_ok(uhd_rx_streamer_make(self->rx_streamer))) {
             return NULL;
         }
@@ -589,7 +607,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
         return -1;
     }
 
-    uhd_error uhd_errno;
     char *device_args = malloc(40);
     memset(device_args, 0x0, 40);
     if (addr) {
@@ -656,8 +673,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
             .n_channels = self->number_rx_streams
     };
 
-    char rx_antennas[8][4] = {"RX1", "RX2", "RX1",
-                              "RX2"};
     uhd_subdev_spec_handle subdev_spec;
     printf("subdev spec string: %s\n", rx_subdev_spec_string);
     uhd_subdev_spec_make(&subdev_spec, rx_subdev_spec_string);
