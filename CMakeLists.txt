@@ -3,7 +3,7 @@ project(pysdruhd)
 
 set(CMAKE_C_STANDARD 99)
 
-set(SOURCE_FILES pysdruhd.c usrp_wrapper.h)
+set(SOURCE_FILES pysdruhd.c usrp_wrapper.h wrapper_helper.c wrapper_helper.h usrp_object.h)
 add_library(pysdruhd SHARED ${SOURCE_FILES})
 
 set_target_properties(pysdruhd PROPERTIES OUTPUT_NAME "pysdruhd" PREFIX "")

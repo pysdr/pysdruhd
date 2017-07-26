@@ -22,86 +22,14 @@
 #define PYSDRUHD_USRP_WRAPPER_H
 
 
+#include "usrp_object.h"
+#include "wrapper_helper.h"
 #include <uhd.h>
 #include <stdio.h>
 #include <string.h>
 #include <structmember.h>
 #include <sys/time.h>
 
-#define MIN(x,y) x < y ? x : y
-
-typedef enum {
-    OFF,
-    TX_STREAM,
-    RX_STREAM,
-    TX_BURST,
-    RX_BURST,
-} stream_mode_t;
-
-stream_mode_t convert_string_to_stream_mode_t(PyObject *string_mode) {
-    stream_mode_t mode = RX_STREAM; /* default to RX streaming */
-    puts("made it to convert\n");
-    fflush(stdout);
-    if (string_mode != NULL && PyString_CheckExact(string_mode)) {
-        size_t compare_length = (size_t) PyString_Size(string_mode);
-        if (strncmp("TX\0", PyString_AsString(string_mode), MIN(compare_length, 2)) == 0) {
-            mode = TX_STREAM;
-        } else if (strncmp("RX\0", PyString_AsString(string_mode), MIN(compare_length, 2)) == 0) {
-            mode = RX_STREAM;
-        } else if (strncmp("OFF\0", PyString_AsString(string_mode), MIN(compare_length, 3)) == 0) {
-            mode = OFF;
-        }
-    } else {
-        /* mode is not one of our known modes. TODO: Panic!!!!! */
-    }
-    return mode;
-}
-
-typedef struct {
-    stream_mode_t mode;
-    double frequency;
-    double rate;
-    double gain;
-    char subdev[6]; /* such as A:0, A:1, B:0, B:1 */
-    char identifier[10]; /* such as TX/RX, RX2, RX1.... (would be nice to have a card type identifier) */
-} stream_config_t;
-
-
-static bool uhd_ok(uhd_error error_value)
-{
-    if (error_value == UHD_ERROR_NONE) {
-        return true;
-    } else {
-        char uhd_error_string[8192];
-        uhd_get_last_error(uhd_error_string, 8192);
-        PyErr_Format(PyExc_Exception, "UHD returned %s", uhd_error_string);
-        return false;
-    }
-}
-
-
-typedef struct {
-    PyObject_HEAD
-    /* Type-specific fields go here. */
-    PyObject *addr;
-    PyObject *usrp_type;
-    uhd_usrp_handle *usrp_object;
-    uhd_rx_streamer_handle *rx_streamer;
-    uhd_rx_metadata_handle *rx_metadata;
-    stream_config_t *rx_streams;
-    int number_rx_streams;
-
-    // None of the TX stuff is implemented yet (one thing at a time)
-    uhd_tx_streamer_handle *tx_streamer;
-    //uhd_tx_metadata_handle *tx_metadata;
-    stream_config_t *tx_streams;
-    size_t number_tx_streams;
-
-    size_t samples_per_buffer;
-    void *recv_buffers;
-    void **recv_buffers_ptr;
-
-} Usrp;
 
 static void
 Usrp_dealloc(Usrp *self) {
@@ -161,7 +89,6 @@ Usrp_dealloc(Usrp *self) {
  */
 static PyObject *
 Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    /* DEBUG */ printf("new()\n");
     Usrp *self = (Usrp *) type->tp_alloc(type, 0);
 
     if (self != NULL) {
@@ -197,12 +124,13 @@ Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
          * I'm not sure how this would happen, but something is horribly wrong.
          * The python Noddy example does this check though...
          */
-        puts("Usrp.__new__ failed\n");
+        PyErr_BadArgument();
         return NULL;
     }
 
     return (PyObject *) self;
 }
+
 
 static int
 Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
@@ -261,63 +189,16 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     size_t channel[] = {0, 1, 2, 3};
     char rx_subdev_spec_string[64] = {'\0'};
 
-    /*
-     * We will copy the dict in to our internal struct and fill in missing values with defaults
-     * If there is no dict then we use the parameter list and fill in missing values with defaults.
-     * How friendly of me...
-     */
     if (streams_dict) {
         if (PyDict_Check(streams_dict)) {
-            PyObject *subdev, *config;
-            Py_ssize_t position = 0;
-            while (PyDict_Next(streams_dict, &position, &subdev, &config)) {
-                stream_config_t this_subdev;
-                PyObject *value;
-
-                strncpy(this_subdev.subdev, PyString_AsString(subdev), 6);
-                const char mode_key[] = "mode";
-                value = PyDict_GetItemString(config, mode_key);
-                this_subdev.mode = convert_string_to_stream_mode_t(value);
-                this_subdev.frequency = frequency_param;
-                this_subdev.rate = rate_param;
-                this_subdev.gain = gain_param;
-
-                value = PyDict_GetItemString(config, "frequency\0");
-                if (value != NULL) {
-                    this_subdev.frequency = PyFloat_AsDouble(value);
-                }
-                value = PyDict_GetItemString(config, "rate\0");
-                if (value != NULL) {
-                    this_subdev.rate = PyFloat_AsDouble(value);
-                }
-                value = PyDict_GetItemString(config, "gain\0");
-                if (value != NULL) {
-                    this_subdev.gain = PyFloat_AsDouble(value);
-                }
-
-                if (this_subdev.mode == RX_STREAM) {
-                    strncat(rx_subdev_spec_string, this_subdev.subdev, 3);
-                    strncat(rx_subdev_spec_string, " \0", 1);
-                    /* DEBUG */ puts("got a rx stream\n");
-                    /* DEBUG */ printf("{'%s': 'frequency':%1.2e, 'rate'=%1.2e, 'gain'=%1.2e}\n", this_subdev.subdev, this_subdev.frequency, this_subdev.rate, this_subdev.gain);
-                    self->rx_streams = realloc(self->rx_streams, sizeof(stream_config_t) * (self->number_rx_streams+1));
-                    memcpy(self->rx_streams + self->number_rx_streams, &this_subdev, sizeof(stream_config_t));
-                    self->number_rx_streams++;
-                } else if (this_subdev.mode == TX_STREAM) {
-                    /* DEBUG */ puts("got a tx stream\n");
-                    /* DEBUG */ printf("{'%s': 'frequency':%1.2e, 'rate'=%1.2e, 'gain'=%1.2e}\n", this_subdev.subdev, this_subdev.frequency, this_subdev.rate, this_subdev.gain);
-                    self->tx_streams = realloc(self->tx_streams, sizeof(stream_config_t) * (self->number_tx_streams+1));
-                    memcpy(self->tx_streams + self->number_tx_streams, &this_subdev, sizeof(stream_config_t));
-
-                    self->number_tx_streams++;
-                }
-            } /* Parsing provided config dict */
+            parse_dict_to_streams_config(self, streams_dict, frequency_param, rate_param, gain_param,
+                                         rx_subdev_spec_string);
         } else {
             PyErr_SetString(PyExc_TypeError, "streams argument needs to be a dict of form"
                             "    {'<DB>:<SUBDEV>': {'mode': 'RX'|'TX', 'frequency': double, 'rate': double, 'gain': double},}");
         }
     } else {
-        // We didn't get a config dict, so default to create 1 RX stream
+        // We didn't get a config dict, so default to create 1 RX stream on A:0
         self->rx_streams = malloc(sizeof(stream_config_t));
         self->number_rx_streams = 1;
         self->rx_streams[0].frequency = frequency_param;
@@ -348,7 +229,8 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     double checkval;
 
 
-    char antennas[8][4] = {"RX1", "RX2", "RX1", "RX2"}; // This unfortunately needs to be in the dict. It could be different for TWINRX, basicrx, and a every other card
+    char rx_antennas[8][4] = {"RX1", "RX2", "RX1",
+                              "RX2"}; // This unfortunately needs to be in the dict. It could be different for TWINRX, basicrx, and a every other card
     uhd_subdev_spec_handle subdev_spec;
     printf("subdev spec string: %s\n", rx_subdev_spec_string);
     uhd_subdev_spec_make(&subdev_spec, rx_subdev_spec_string);
@@ -356,7 +238,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
 
     for (size_t rx_stream_index=0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
         printf("setting up rx stream %lu\n", rx_stream_index);
-        uhd_usrp_set_rx_antenna(*self->usrp_object, antennas[rx_stream_index], channel[rx_stream_index]);
+        uhd_usrp_set_rx_antenna(*self->usrp_object, rx_antennas[rx_stream_index], channel[rx_stream_index]);
         uhd_errno = uhd_usrp_set_rx_rate(*self->usrp_object, self->rx_streams[rx_stream_index].rate, channel[rx_stream_index]);
         uhd_errno = uhd_usrp_get_rx_rate(*self->usrp_object, channel[rx_stream_index], &checkval);
         rate_param = checkval;
@@ -380,21 +262,18 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
         puts("make the stremer object\n");
         uhd_errno = uhd_usrp_get_rx_stream(*self->usrp_object, &stream_args, *self->rx_streamer);
         if (uhd_errno != UHD_ERROR_NONE) {
-            puts("we got an error from uhd_usrp_get_rx_stream\n");
             char dbg_buf[1024];
             uhd_get_last_error(dbg_buf, 1024);
-            puts(dbg_buf);
+            PyErr_SetString(PyExc_EnvironmentError, dbg_buf);
         }
 
         uhd_errno = uhd_rx_streamer_max_num_samps(*self->rx_streamer, &self->samples_per_buffer);
-        printf("max samples per buffer is %lu\n", self->samples_per_buffer);
         size_t buffer_size_per_channel = self->samples_per_buffer * 2 * sizeof(float);
         self->recv_buffers = malloc(self->number_rx_streams * buffer_size_per_channel);
         self->recv_buffers_ptr = malloc(sizeof(void *) * self->number_rx_streams);
         // watch out world, we're indexing void* 's!
         for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
             self->recv_buffers_ptr[rx_stream_index] = self->recv_buffers + (rx_stream_index * buffer_size_per_channel);
-            printf("buffer for channel %lu is %p\n", rx_stream_index, self->recv_buffers_ptr[rx_stream_index]);
         }
     }
     uhd_subdev_spec_free(&subdev_spec);
@@ -717,12 +596,17 @@ Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef Usrp_methods[] = {
-        {"recv", (PyCFunction) Usrp_recv, METH_NOARGS, recv_docstring},
-        {"sensor_names", (PyCFunction) Usrp_sensor_names, METH_NOARGS, sensor_names_docstring},
-        {"get_sensor", (PyCFunction) Usrp_get_sensor, METH_VARARGS|METH_KEYWORDS, get_sensor_docstring},
+        {"recv",                  (PyCFunction) Usrp_recv,                  METH_NOARGS,  recv_docstring},
+        {"sensor_names",          (PyCFunction) Usrp_sensor_names,          METH_NOARGS,  sensor_names_docstring},
+        {"get_sensor",            (PyCFunction) Usrp_get_sensor,            METH_VARARGS |
+                                                                            METH_KEYWORDS, get_sensor_docstring},
         {"set_master_clock_rate", (PyCFunction) Usrp_set_master_clock_rate, METH_VARARGS, set_master_clock_rate_docstring},
-        {"set_time", (PyCFunction) Usrp_set_time, METH_VARARGS|METH_KEYWORDS, set_time_docstring},
-        {"send_stream_command", (PyCFunction) Usrp_send_stream_command, METH_VARARGS|METH_KEYWORDS, send_stream_command_docstring},
+        {"set_time",              (PyCFunction) Usrp_set_time,              METH_VARARGS |
+                                                                            METH_KEYWORDS, set_time_docstring},
+        {"send_stream_command",   (PyCFunction) Usrp_send_stream_command,   METH_VARARGS |
+                                                                            METH_KEYWORDS, send_stream_command_docstring},
+        {"set_frequency",         (PyCFunction) Usrp_set_frequency,         METH_VARARGS |
+                                                                            METH_KEYWORDS, set_frequency_docstring},
         {NULL}  /* Sentinel */
 };
 
