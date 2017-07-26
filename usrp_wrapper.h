@@ -259,22 +259,50 @@ static const char send_stream_command_docstring[] =
 // Ooops! this isn't actually doing anything yet
 static PyObject *
 Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds) {
-    PyObject *command;
 
-    if (!PyArg_ParseTuple(args, "O", &command)) {
+
+    PyObject *command=NULL;
+    char *mode=NULL, *when=NULL;
+    PyObject *effective_time;
+    static char *kwlist[] = {"mode", "when", "time", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OssO", kwlist,
+                                     &command, &mode, &when, &effective_time
+    )) {
         return NULL;
     }
 
-    /* This should really be made adjustable, which would make this wrapper probably
-     * the only place that this is an easy way to get streaming started at a time
-     * that you care about
-     */
+    // Our stream command will default to start streaming now
     uhd_stream_cmd_t stream_cmd = {
             .stream_mode = UHD_STREAM_MODE_START_CONTINUOUS,
             .stream_now = true,
             //.time_spec_full_secs = 1,
             //.time_spec_frac_secs= 0.,
     };
+
+    if (command != NULL && PyDict_Check(command)) {
+        // we have a dict command! use it
+        mode = PyString_AsString(PyDict_GetItemString(command, "mode"));
+        if (strncmp(mode, "continuous", 10) == 0) {
+            stream_cmd.stream_mode = UHD_STREAM_MODE_START_CONTINUOUS;
+        } else if (strncmp(mode, "nsamps", 6)) {
+            stream_cmd.stream_mode = UHD_STREAM_MODE_NUM_SAMPS_AND_DONE;
+        }
+
+        when = PyString_AsString(PyDict_GetItemString(command, "when"));
+        // just default this to true
+        stream_cmd.stream_now = true;
+
+        if (strncmp(when, "future", 6) == 0) {
+            stream_cmd.stream_now = false;
+        }
+        // then we have to pull out the timespec
+    } else {
+    }
+
+    /* This should really be made adjustable, which would make this wrapper probably
+     * the only place that this is an easy way to get streaming started at a time
+     * that you care about
+     */
     if (!uhd_ok( uhd_usrp_set_time_source(*self->usrp_object, "internal", 0) )) {
         return NULL;
     }
