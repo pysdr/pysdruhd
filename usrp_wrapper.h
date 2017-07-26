@@ -133,8 +133,7 @@ Usrp_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 
 
 static int
-Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
-{
+Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
     PyObject *addr = NULL, *addr2 = NULL, *tmp = NULL;
     PyObject *usrp_type = NULL;
     PyObject *streams_dict = NULL;
@@ -145,7 +144,8 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {"addr", "addr2", "type", "streams", "frequency", "rate", "gain", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OOOOddd", kwlist,
-                                     &addr, &addr2, &usrp_type, &streams_dict, &frequency_param, &rate_param, &gain_param
+                                     &addr, &addr2, &usrp_type, &streams_dict, &frequency_param, &rate_param,
+                                     &gain_param
     )) {
         return -1;
     }
@@ -195,7 +195,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
                                          rx_subdev_spec_string);
         } else {
             PyErr_SetString(PyExc_TypeError, "streams argument needs to be a dict of form"
-                            "    {'<DB>:<SUBDEV>': {'mode': 'RX'|'TX', 'frequency': double, 'rate': double, 'gain': double},}");
+                    "    {'<DB>:<SUBDEV>': {'mode': 'RX'|'TX', 'frequency': double, 'rate': double, 'gain': double},}");
         }
     } else {
         // We didn't get a config dict, so default to create 1 RX stream on A:0
@@ -236,14 +236,16 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     uhd_subdev_spec_make(&subdev_spec, rx_subdev_spec_string);
     uhd_usrp_set_rx_subdev_spec(*self->usrp_object, subdev_spec, 0);
 
-    for (size_t rx_stream_index=0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
+    for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
         printf("setting up rx stream %lu\n", rx_stream_index);
         uhd_usrp_set_rx_antenna(*self->usrp_object, rx_antennas[rx_stream_index], channel[rx_stream_index]);
-        uhd_errno = uhd_usrp_set_rx_rate(*self->usrp_object, self->rx_streams[rx_stream_index].rate, channel[rx_stream_index]);
+        uhd_errno = uhd_usrp_set_rx_rate(*self->usrp_object, self->rx_streams[rx_stream_index].rate,
+                                         channel[rx_stream_index]);
         uhd_errno = uhd_usrp_get_rx_rate(*self->usrp_object, channel[rx_stream_index], &checkval);
         rate_param = checkval;
 
-        uhd_errno = uhd_usrp_set_rx_gain(*self->usrp_object, self->rx_streams[rx_stream_index].gain, channel[rx_stream_index], "");
+        uhd_errno = uhd_usrp_set_rx_gain(*self->usrp_object, self->rx_streams[rx_stream_index].gain,
+                                         channel[rx_stream_index], "");
         uhd_errno = uhd_usrp_get_rx_gain(*self->usrp_object, channel[rx_stream_index], "", &checkval);
         gain_param = checkval;
 
@@ -254,20 +256,24 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
                 .dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO,
         };
         uhd_tune_result_t tune_result;
-        uhd_errno = uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, channel[rx_stream_index], &tune_result);
-        uhd_errno = uhd_usrp_get_rx_freq(*self->usrp_object, channel[rx_stream_index], &checkval);
+        if (!uhd_ok(uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, channel[rx_stream_index], &tune_result))) {
+            return -1;
+        }
+        if (!uhd_ok(uhd_usrp_get_rx_freq(*self->usrp_object, channel[rx_stream_index], &checkval))) {
+            return -1;
+        }
         frequency_param = tune_result.actual_rf_freq;
     }
     if (self->number_rx_streams > 0) {
         puts("make the stremer object\n");
-        uhd_errno = uhd_usrp_get_rx_stream(*self->usrp_object, &stream_args, *self->rx_streamer);
-        if (uhd_errno != UHD_ERROR_NONE) {
-            char dbg_buf[1024];
-            uhd_get_last_error(dbg_buf, 1024);
-            PyErr_SetString(PyExc_EnvironmentError, dbg_buf);
+        if (!uhd_ok(uhd_usrp_get_rx_stream(*self->usrp_object, &stream_args, *self->rx_streamer))) {
+            return -1;
         }
 
-        uhd_errno = uhd_rx_streamer_max_num_samps(*self->rx_streamer, &self->samples_per_buffer);
+        if (!uhd_ok(uhd_rx_streamer_max_num_samps(*self->rx_streamer, &self->samples_per_buffer))) {
+            return -1;
+        }
+
         size_t buffer_size_per_channel = self->samples_per_buffer * 2 * sizeof(float);
         self->recv_buffers = malloc(self->number_rx_streams * buffer_size_per_channel);
         self->recv_buffers_ptr = malloc(sizeof(void *) * self->number_rx_streams);
@@ -279,7 +285,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds)
     uhd_subdev_spec_free(&subdev_spec);
 
 
-    for (size_t tx_stream_index=0; tx_stream_index < self->number_tx_streams; ++tx_stream_index) {
+    for (size_t tx_stream_index = 0; tx_stream_index < self->number_tx_streams; ++tx_stream_index) {
         // TODO: set up tx streams
     }
     puts("done initing\n");
@@ -300,20 +306,20 @@ static PyMemberDef Usrp_members[] = {
 
 
 static const char recv_docstring[] =
-    "samples, metadata = Usrp.recv()\n\n"
-    "    return an tuple of (samples, metadata). Samples are of shape (nchannels, nsamples) where nchannels matches "
-    "the number of subdevs specified during construction and nsamples is the number of samples in the packet returned "
-    "by UHD. Metadata is a tuple with a timespec of the first sample in this packet.";
+        "samples, metadata = Usrp.recv()\n\n"
+                "    return an tuple of (samples, metadata). Samples are of shape (nchannels, nsamples) where nchannels matches "
+                "the number of subdevs specified during construction and nsamples is the number of samples in the packet returned "
+                "by UHD. Metadata is a tuple with a timespec of the first sample in this packet.";
+
 static PyObject *
-Usrp_recv(Usrp *self)
-{
+Usrp_recv(Usrp *self) {
     size_t rx_samples_count = 0;
     time_t full_secs = 0;
     double frac_secs = 0.;
     uhd_error uhd_errno;
 
     uhd_errno = uhd_rx_streamer_recv(*self->rx_streamer, self->recv_buffers_ptr, self->samples_per_buffer,
-                                               self->rx_metadata, 3.0, false, &rx_samples_count);
+                                     self->rx_metadata, 3.0, false, &rx_samples_count);
 
     uhd_errno = uhd_rx_metadata_time_spec(*self->rx_metadata, &full_secs, &frac_secs);
     PyObject *metadata = PyTuple_New(2);
@@ -332,11 +338,11 @@ Usrp_recv(Usrp *self)
 
 
 static const char sensor_names_docstring[] =
-    "names = sensor_names_docstring()\n\n"
-    "    Returns a list of strings containing all of the names of the sensors on a USRP as reported by UHD.";
+        "names = sensor_names_docstring()\n\n"
+                "    Returns a list of strings containing all of the names of the sensors on a USRP as reported by UHD.";
+
 static PyObject *
-Usrp_sensor_names(Usrp *self)
-{
+Usrp_sensor_names(Usrp *self) {
     uhd_error uhd_errno;
     uhd_string_vector_handle sensor_names;
     uhd_string_vector_make(&sensor_names);
@@ -345,7 +351,7 @@ Usrp_sensor_names(Usrp *self)
     uhd_string_vector_size(sensor_names, &number_sensors);
     PyObject *sensor_names_list = PyList_New(0);
 
-    for (unsigned int ii=0; ii < number_sensors; ++ii) {
+    for (unsigned int ii = 0; ii < number_sensors; ++ii) {
         char sensor_name[64];
         uhd_errno = uhd_string_vector_at(sensor_names, ii, sensor_name, 64);
         PyList_Append(sensor_names_list, PyString_FromString(sensor_name));
@@ -356,12 +362,12 @@ Usrp_sensor_names(Usrp *self)
 
 
 static const char get_sensor_docstring[] =
-    "value = get_sensor(sensorname)\n\n"
-    "   returns the value of a sensor with name matching the string sensorname. The datatype of a sensor value is "
-    "dependent on the sensor";
+        "value = get_sensor(sensorname)\n\n"
+                "   returns the value of a sensor with name matching the string sensorname. The datatype of a sensor value is "
+                "dependent on the sensor";
+
 static PyObject *
-Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds)
-{
+Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds) {
 
     static char *kwlist[] = {"sensor", NULL};
     PyObject *sensor_string = NULL;
@@ -409,11 +415,11 @@ Usrp_get_sensor(Usrp *self, PyObject *args, PyObject *kwds)
 
 
 static const char set_master_clock_rate_docstring[] =
-    "set_master_clock_rate(rate)"
-    "set the master clock rate to rate, a floating point/double type. Usually has some impact on ADC/DAC rate.";
+        "set_master_clock_rate(rate)"
+                "set the master clock rate to rate, a floating point/double type. Usually has some impact on ADC/DAC rate.";
+
 static PyObject *
-Usrp_set_master_clock_rate(Usrp *self, PyObject *args)
-{
+Usrp_set_master_clock_rate(Usrp *self, PyObject *args) {
     double clock_rate;
     if (!PyArg_ParseTuple(args, "d",
                           &clock_rate)) {
@@ -427,16 +433,16 @@ Usrp_set_master_clock_rate(Usrp *self, PyObject *args)
 
 
 static const char set_time_docstring[] =
-    "set_time(when='pps', time=0).\n\n"
-    "   `time` is either a tuple of (full seconds, fractional seconds), 'gps', or 'pc'. full seconds should be an integer"
-    " type and fractional seconds should be a float/double type. Default time is 0. 'gps' will set the device time to match"
-    " the GPS time on the on-board GPSDO if it exists. 'pc' will set the device time to whatever localtime returns.\n"
-    "   `when` should be a string matching either 'now' or 'pps'. Default is 'pps' which sets the time at the next PPS. If"
-    " pps is used with 'gps' or 'pc' time, then the \n";
+        "set_time(when='pps', time=0).\n\n"
+                "   `time` is either a tuple of (full seconds, fractional seconds), 'gps', or 'pc'. full seconds should be an integer"
+                " type and fractional seconds should be a float/double type. Default time is 0. 'gps' will set the device time to match"
+                " the GPS time on the on-board GPSDO if it exists. 'pc' will set the device time to whatever localtime returns.\n"
+                "   `when` should be a string matching either 'now' or 'pps'. Default is 'pps' which sets the time at the next PPS. If"
+                " pps is used with 'gps' or 'pc' time, then the \n";
+
 static PyObject *
-Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
-{
-    PyObject *when=NULL, *time=NULL, *offset=NULL;
+Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds) {
+    PyObject *when = NULL, *time = NULL, *offset = NULL;
     static char *kwlist[] = {"time", "when", "offset", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OOO", kwlist,
@@ -469,8 +475,8 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
             } else if (strncmp(PyString_AsString(time), "pc", MIN((size_t) PyString_Size(time), 2))) {
                 struct timeval tv;
                 gettimeofday(&tv, NULL);
-                full_secs = (int)tv.tv_sec;
-                fractional_secs = (double)tv.tv_usec * 1e-6;
+                full_secs = (int) tv.tv_sec;
+                fractional_secs = (double) tv.tv_usec * 1e-6;
             }
             if (when_data != NULL && strncmp(when_data, "pps", 3) == 0) {
                 if (fractional_secs > 0.) {
@@ -478,17 +484,17 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
                     full_secs += 1;
                 }
             }
-        }
-        else if (PyTuple_Check(time) && PyTuple_Size(time)==2) { /* if we got a tuple, then it's whole secs, fractional secs. a very sexy time */
+        } else if (PyTuple_Check(time) && PyTuple_Size(time) ==
+                                          2) { /* if we got a tuple, then it's whole secs, fractional secs. a very sexy time */
             full_secs = (int) PyInt_AsLong(PyTuple_GetItem(time, 0));
             fractional_secs = PyInt_AsLong(PyTuple_GetItem(time, 1));
         }
     }
 
     if (when_data != NULL && strncmp(when_data, "now", 3) == 0) {
-            uhd_usrp_set_time_now(*self->usrp_object, full_secs, fractional_secs, 0);
+        uhd_usrp_set_time_now(*self->usrp_object, full_secs, fractional_secs, 0);
     } else if (when_data == NULL || strncmp(when_data, "pps", 3) == 0) { // default
-            uhd_usrp_set_time_next_pps(*self->usrp_object, full_secs, fractional_secs, 0);
+        uhd_usrp_set_time_next_pps(*self->usrp_object, full_secs, fractional_secs, 0);
     } else {
         // when_data was provided, but we don't recognize it
         PyErr_Format(PyExc_TypeError,
@@ -501,14 +507,14 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds)
 
 
 static const char send_stream_command_docstring[] =
-    "send_stream_command(mode='continuous', when='now')\n\n"
-    "    send_stream_command will create and issue a stream command to UHD. UHD stream commands send an rx or tx "
-    "streamer a command that contains a `stream_mode` enum, `stream_now` bool, and optionall a timespec. This wrapper "
-    "accepts the mode as a string and when can either be a string matching 'now' or a tuple of (full secs, fractional "
-    "secs)";
+        "send_stream_command(mode='continuous', when='now')\n\n"
+                "    send_stream_command will create and issue a stream command to UHD. UHD stream commands send an rx or tx "
+                "streamer a command that contains a `stream_mode` enum, `stream_now` bool, and optionall a timespec. This wrapper "
+                "accepts the mode as a string and when can either be a string matching 'now' or a tuple of (full secs, fractional "
+                "secs)";
+
 static PyObject *
-Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds)
-{
+Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds) {
     PyObject *command;
 
     if (!PyArg_ParseTuple(args, "O", &command)) {
@@ -538,9 +544,9 @@ static const char set_frequency_docstring[] =
                 "    set_frequency tunes the provided subdev to with a frequency spec. The spec can either be floating"
                 " point type parameters with kwargs center_frequency and offset, or a tuple with"
                 " (center_frequency, offset). The return value is the actual value that was tuned to.";
+
 static PyObject *
-Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds)
-{
+Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds) {
     double frequency = 900e6;
     double offset = 0.0;
     PyObject *frequency_tuple;
@@ -555,7 +561,7 @@ Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds)
     }
 
     // what if we get a tx subdev?
-    int rx_stream_index = 0; /* actually need to find which channel number this is based on subdev string */
+    int rx_stream_index = 0;
     for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
         if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
             rx_stream_index = ii;
@@ -595,6 +601,87 @@ Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds)
 }
 
 
+static const char set_gain_docstring[] =
+        "set_gain(subdev, gain=1.0, mode='relative')\n\n"
+                "    set_gain sets the gain of provided subdev to the specified gain. The gain can either be a relative "
+                "gain in range [0,1] or absolute gain in dB. The return value is the actual gain that was set. By "
+                "default relative gain is used with a default value of 1.0 (full gain)";
+
+static PyObject *
+Usrp_set_gain(Usrp *self, PyObject *args, PyObject *kwds) {
+    double gain = 1.0;
+    char *gain_mode = NULL;
+    char *subdev = NULL;
+
+    static char *kwlist[] = {"subdev", "gain", "mode", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ds", kwlist,
+                                     &subdev, &gain_mode, &gain
+    )) {
+        return NULL;
+    }
+
+    // what if we get a tx subdev?
+    int rx_stream_index = 0;
+    for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
+        if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
+            rx_stream_index = ii;
+            break;
+        }
+    }
+    int channel = rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
+
+    double checkval;
+    if (!uhd_ok(uhd_usrp_set_normalized_rx_gain(*self->usrp_object, gain, channel))) {
+        return NULL;
+    }
+    if (!uhd_ok(uhd_usrp_get_normalized_rx_gain(*self->usrp_object, channel, &checkval))) {
+        return NULL;
+    }
+    return PyFloat_FromDouble(checkval);
+}
+
+
+static const char set_rate_docstring[] =
+        "set_rate(subdev, rate)\n\n"
+                "    set_rate sets the sample rate of provided subdev to the specified rate. The return value is the "
+                "actual rate that was set.";
+
+static PyObject *
+Usrp_set_rate(Usrp *self, PyObject *args, PyObject *kwds) {
+    double rate = 1.0;
+    char *subdev = NULL;
+
+    static char *kwlist[] = {"subdev", "rate", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|d", kwlist,
+                                     &subdev, &rate
+    )) {
+        return NULL;
+    }
+
+    // what if we get a tx subdev?
+    int rx_stream_index = 0;
+    for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
+        if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
+            rx_stream_index = ii;
+            break;
+        }
+    }
+    int channel = rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
+
+    double checkval;
+    if (!uhd_ok(uhd_usrp_set_rx_rate(*self->usrp_object, self->rx_streams[rx_stream_index].rate,
+                                     rx_stream_index))) {
+        return NULL;
+    }
+    if (!uhd_ok(uhd_usrp_get_rx_rate(*self->usrp_object, rx_stream_index, &checkval))) {
+        return NULL;
+    }
+    return PyFloat_FromDouble(checkval);
+}
+
+
 static PyMethodDef Usrp_methods[] = {
         {"recv",                  (PyCFunction) Usrp_recv,                  METH_NOARGS,  recv_docstring},
         {"sensor_names",          (PyCFunction) Usrp_sensor_names,          METH_NOARGS,  sensor_names_docstring},
@@ -607,37 +694,41 @@ static PyMethodDef Usrp_methods[] = {
                                                                             METH_KEYWORDS, send_stream_command_docstring},
         {"set_frequency",         (PyCFunction) Usrp_set_frequency,         METH_VARARGS |
                                                                             METH_KEYWORDS, set_frequency_docstring},
+        {"set_gain",              (PyCFunction) Usrp_set_gain,              METH_VARARGS |
+                                                                            METH_KEYWORDS, set_gain_docstring},
+        {"set_rate",              (PyCFunction) Usrp_set_rate,              METH_VARARGS |
+                                                                            METH_KEYWORDS, set_rate_docstring},
         {NULL}  /* Sentinel */
 };
 
 static const char Usrp_docstring[] =
-    "A friendly native python interface to USRPs. The constructor looks like this (all optional arguments): "
+        "A friendly native python interface to USRPs. The constructor looks like this (all optional arguments): "
 
-    "        Usrp(addr, type, streams, frequency, rate, gain)\n"
-    "            addr: a string with the address of a network connected USRP\n"
-    "            type: a string with the type of USRP (find with uhd_find_devices)\n"
-    "            streams: a dictionary of the form {'subdev': {'frequency': <double>, 'rate': <double>, 'gain': <double>}, }\n"
-    "            The keys within a subdev are optional and will take default values of the frequency, rate, and gain parameters:\n"
-    "            frequency: <double> the center frequency to tune to\n"
-    "            rate: <double> the requested sample rate\n"
-    "            gain: <double> the requested gain\n"
-    "\n"
-    "        The primary function of a Usrp is to transmit and receive samples. These are handled through\n"
-    "        samples, metadata = Usrp.recv()\n"
-    "        Usrp.transmit(samples) (not implemented)\n"
-    "\n"
-    "        In both cases samples is a numpy array with shape (nchannels, nsamps)\n"
-    "\n"
-    "    There are several currently unsupported USRP features that are of interest:\n"
-    "        * burst modes\n"
-    "        * offset tuning (relatively easy to impl)\n"
-    "        * settings transport args like buffer size and type conversions\n"
-    "\n"
-    "I'm also interested in implementing some of the as_sequence, etc methods so we can do things like "
-    "reduce(frame_handler, filter(burst_detector, map(signal_processing, Usrp())))\n"
-    "\n"
-    "Until then, this is missing some more advances features and is crash-prone when things aren't butterflies and \n"
-    "rainbows, but is at least capable of streaming 200 Msps in to python with no overhead.";
+                "        Usrp(addr, type, streams, frequency, rate, gain)\n"
+                "            addr: a string with the address of a network connected USRP\n"
+                "            type: a string with the type of USRP (find with uhd_find_devices)\n"
+                "            streams: a dictionary of the form {'subdev': {'frequency': <double>, 'rate': <double>, 'gain': <double>}, }\n"
+                "            The keys within a subdev are optional and will take default values of the frequency, rate, and gain parameters:\n"
+                "            frequency: <double> the center frequency to tune to\n"
+                "            rate: <double> the requested sample rate\n"
+                "            gain: <double> the requested gain\n"
+                "\n"
+                "        The primary function of a Usrp is to transmit and receive samples. These are handled through\n"
+                "        samples, metadata = Usrp.recv()\n"
+                "        Usrp.transmit(samples) (not implemented)\n"
+                "\n"
+                "        In both cases samples is a numpy array with shape (nchannels, nsamps)\n"
+                "\n"
+                "    There are several currently unsupported USRP features that are of interest:\n"
+                "        * burst modes\n"
+                "        * offset tuning (relatively easy to impl)\n"
+                "        * settings transport args like buffer size and type conversions\n"
+                "\n"
+                "I'm also interested in implementing some of the as_sequence, etc methods so we can do things like "
+                "reduce(frame_handler, filter(burst_detector, map(signal_processing, Usrp())))\n"
+                "\n"
+                "Until then, this is missing some more advances features and is crash-prone when things aren't butterflies and \n"
+                "rainbows, but is at least capable of streaming 200 Msps in to python with no overhead.";
 
 
 static PyTypeObject UsrpType = {
