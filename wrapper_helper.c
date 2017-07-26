@@ -24,8 +24,8 @@ stream_mode_t convert_string_to_stream_mode_t(PyObject *string_mode) {
     return mode;
 }
 
-void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double frequency_param, double rate_param,
-                                  double gain_param, char *rx_subdev_spec_string) {
+void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double frequency_param, double lo_offset_param,
+                                  double rate_param, double gain_param, char *rx_subdev_spec_string) {
     PyObject *subdev, *config;
     Py_ssize_t position = 0;
     while (PyDict_Next(streams_dict, &position, &subdev, &config)) {
@@ -37,12 +37,15 @@ void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double fre
         value = PyDict_GetItemString(config, mode_key);
         this_subdev.mode = convert_string_to_stream_mode_t(value);
         this_subdev.frequency = frequency_param;
+        this_subdev.lo_offset = lo_offset_param;
         this_subdev.rate = rate_param;
         this_subdev.gain = gain_param;
 
         value = PyDict_GetItemString(config, "antenna\0");
         if (value != NULL) {
             strncpy(this_subdev.antenna, PyString_AsString(value), 6);
+        } else {
+            PyErr_Format(PyExc_TypeError, "Uhd dict parameter requires each subdev to have an 'antenna' set; %s did not", this_subdev.subdev);
         }
         value = PyDict_GetItemString(config, "frequency\0");
         if (value != NULL) {

@@ -32,8 +32,8 @@
 
 stream_mode_t convert_string_to_stream_mode_t(PyObject *string_mode);
 
-void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double frequency_param, double rate_param,
-                                  double gain_param, char *rx_subdev_spec_string);
+void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double frequency_param, double lo_offset,
+                                  double rate_param, double gain_param, char *rx_subdev_spec_string);
 
 
 static inline bool uhd_ok(uhd_error error_value) {

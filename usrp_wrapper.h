@@ -630,7 +630,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
 
     if (streams_dict) {
         if (PyDict_Check(streams_dict)) {
-            parse_dict_to_streams_config(self, streams_dict, frequency_param, rate_param, gain_param,
+            parse_dict_to_streams_config(self, streams_dict, frequency_param, lo_offset_param, rate_param, gain_param,
                                          rx_subdev_spec_string);
         } else {
             PyErr_SetString(PyExc_TypeError, "streams argument needs to be a dict of form"
