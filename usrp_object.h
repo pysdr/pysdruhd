@@ -24,7 +24,7 @@ typedef struct {
     double lo_offset;
     double rate;
     double gain;
-    char subdev[6]; /* such as A:0, A:1, B:0, B:1 */
+    char subdev[10]; /* such as A:0, A:1, B:0, B:1 */
     /* No one can tell me what the difference between a subdev and an antenna is, but if I don't call set_antenna
      * with an antenna name AND a channel number (that also identifies the subdev) then UHD won't use that antenna.
      */

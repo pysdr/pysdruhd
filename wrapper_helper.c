@@ -32,7 +32,7 @@ void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double fre
         stream_config_t this_subdev;
         PyObject *value;
 
-        strncpy(this_subdev.subdev, PyString_AsString(subdev), 6);
+        strncpy(this_subdev.subdev, PyString_AsString(subdev), 10);
         const char mode_key[] = "mode";
         value = PyDict_GetItemString(config, mode_key);
         this_subdev.mode = convert_string_to_stream_mode_t(value);
@@ -65,7 +65,7 @@ void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double fre
         }
 
         if (this_subdev.mode == RX_STREAM) {
-            strncat(rx_subdev_spec_string, this_subdev.subdev, 3);
+            strncat(rx_subdev_spec_string, this_subdev.subdev, 6);
             strncat(rx_subdev_spec_string, " \0", 1);
             /* DEBUG */ puts("got a rx stream\n");
             /* DEBUG */ printf("{'%s': 'frequency':%1.2e, 'rate'=%1.2e, 'gain'=%1.2e}\n", this_subdev.subdev,

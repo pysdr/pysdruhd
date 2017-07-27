@@ -299,7 +299,7 @@ static PyObject *
 Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds) {
     double frequency = 900e6;
     double offset = 0.0;
-    PyObject *frequency_tuple;
+    PyObject *frequency_tuple = NULL;
     char *subdev = NULL;
 
     static char *kwlist[] = {"subdev", "center_frequency", "offset", "frequency_spec", NULL};
