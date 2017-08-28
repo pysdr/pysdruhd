@@ -29,6 +29,10 @@
 
 #define MIN(x, y) (x) < (y) ? (x) : (y)
 
+typedef struct pysdr_subdev {
+    stream_mode_t mode;
+    int index;
+} pysdr_subdev_t;
 
 stream_mode_t convert_string_to_stream_mode_t(PyObject *string_mode);
 
@@ -48,6 +52,8 @@ static inline bool uhd_ok(uhd_error error_value) {
     }
     return return_value;
 }
-
+pysdr_subdev_t subdev_from_spec(const Usrp *self, const char *subdev);
+double pysdr_set_rx_rate(uhd_usrp_handle usrp, double rate, size_t stream_index);
+double pysdr_set_tx_rate(uhd_usrp_handle usrp, double rate, size_t stream_index);
 
 #endif //PYSDRUHD_WRAPPER_HELPER_H

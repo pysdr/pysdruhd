@@ -84,3 +84,51 @@ void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double fre
         }
     } /* Parsing provided config dict */
 }
+
+
+pysdr_subdev_t
+subdev_from_spec(const Usrp *self, const char *subdev) {
+    pysdr_subdev_t ret_subdev;
+    for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
+        if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
+            ret_subdev.index = ii;
+            ret_subdev.mode = RX_STREAM;
+            break;
+        }
+    }
+    for (unsigned int ii = 0; ii < self->number_tx_streams; ++ii) {
+        if (strncmp(self->tx_streams[ii].subdev, subdev, 6) == 0) {
+            ret_subdev.index = ii;
+            ret_subdev.mode = TX_STREAM;
+            break;
+        }
+    }
+
+    return ret_subdev;
+}
+
+
+double pysdr_set_rx_rate(uhd_usrp_handle usrp, double rate, size_t stream_index) {
+    printf("setting rx rate to %1.3F\n", rate);
+    double checkval;
+    if (!uhd_ok(uhd_usrp_set_rx_rate(usrp, rate, stream_index))) {
+        return -1.0;
+    }
+    if (!uhd_ok(uhd_usrp_get_rx_rate(usrp, stream_index, &checkval))) {
+        return -1.0;
+    }
+    return checkval;
+}
+
+
+double pysdr_set_tx_rate(uhd_usrp_handle usrp, double rate, size_t stream_index) {
+    printf("setting tx rate to %1.3F\n", rate);
+    double checkval;
+    if (!uhd_ok(uhd_usrp_set_tx_rate(usrp, rate, stream_index))) {
+        return -1.0;
+    }
+    if (!uhd_ok(uhd_usrp_get_tx_rate(usrp, stream_index, &checkval))) {
+        return -1.0;
+    }
+    return checkval;
+}

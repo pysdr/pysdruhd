@@ -300,25 +300,18 @@ Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds) {
     double frequency = 900e6;
     double offset = 0.0;
     PyObject *frequency_tuple = NULL;
-    char *subdev = NULL;
+    char *subdev_spec = NULL;
 
     static char *kwlist[] = {"subdev", "center_frequency", "offset", "frequency_spec", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ddO", kwlist,
-                                     &subdev, &frequency, &offset, &frequency_tuple
+                                     &subdev_spec, &frequency, &offset, &frequency_tuple
     )) {
         return NULL;
     }
 
-    // what if we get a tx subdev?
-    int rx_stream_index = 0;
-    for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
-        if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
-            rx_stream_index = ii;
-            break;
-        }
-    }
-    size_t channel = (size_t) rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
+    pysdr_subdev_t subdev;
+    subdev = subdev_from_spec(self, subdev_spec);
 
     if (frequency_tuple != NULL && PyTuple_Check(frequency_tuple)) {
         if (PyTuple_Size(frequency_tuple) == 2) {
@@ -342,15 +335,29 @@ Usrp_set_frequency(Usrp *self, PyObject *args, PyObject *kwds) {
     };
     double checkval;
     uhd_tune_result_t tune_result;
-    if (!uhd_ok( uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, channel, &tune_result) )) {
-        return NULL;
+
+    if (subdev.mode == RX_STREAM) {
+        if (!uhd_ok( uhd_usrp_set_rx_freq(*self->usrp_object, &tune_request, (size_t) subdev.index, &tune_result) )) {
+            return NULL;
+        }
+        if (!uhd_ok( uhd_usrp_get_rx_freq(*self->usrp_object, (size_t) subdev.index, &checkval) )) {
+            return NULL;
+        }
+        self->rx_streams[subdev.index].frequency = frequency;
+        self->rx_streams[subdev.index].lo_offset = offset;
+        frequency = tune_result.actual_rf_freq;
+    } else if (subdev.mode == TX_STREAM) {
+        if (!uhd_ok( uhd_usrp_set_tx_freq(*self->usrp_object, &tune_request, (size_t) subdev.index, &tune_result) )) {
+            return NULL;
+        }
+        if (!uhd_ok( uhd_usrp_get_tx_freq(*self->usrp_object, (size_t) subdev.index, &checkval) )) {
+            return NULL;
+        }
+        self->tx_streams[subdev.index].frequency = frequency;
+        self->tx_streams[subdev.index].lo_offset = offset;
+        frequency = tune_result.actual_rf_freq;
     }
-    if (!uhd_ok( uhd_usrp_get_rx_freq(*self->usrp_object, channel, &checkval) )) {
-        return NULL;
-    }
-    self->rx_streams[rx_stream_index].frequency = frequency;
-    self->rx_streams[rx_stream_index].lo_offset = offset;
-    frequency = tune_result.actual_rf_freq;
+
     return PyFloat_FromDouble(frequency);
 }
 
@@ -365,33 +372,36 @@ static PyObject *
 Usrp_set_gain(Usrp *self, PyObject *args, PyObject *kwds) {
     double gain = 1.0;
     char *gain_mode = NULL;
-    char *subdev = NULL;
+    char *subdev_spec = NULL;
 
     static char *kwlist[] = {"subdev", "gain", "mode", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ds", kwlist,
-                                     &subdev, &gain_mode, &gain
+                                     &subdev_spec, &gain_mode, &gain
     )) {
         return NULL;
     }
 
-    // what if we get a tx subdev?
-    int rx_stream_index = 0;
-    for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
-        if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
-            rx_stream_index = ii;
-            break;
-        }
-    }
-    size_t channel = (size_t) rx_stream_index; // this is wrong, we actually need to keep around a channel mapping :-(
+    pysdr_subdev_t subdev;
+    subdev = subdev_from_spec(self, subdev_spec);
 
     double checkval;
-    if (!uhd_ok(uhd_usrp_set_normalized_rx_gain(*self->usrp_object, gain, (size_t) channel))) {
-        return NULL;
+    if (subdev.mode == RX_STREAM) {
+        if (!uhd_ok(uhd_usrp_set_normalized_rx_gain(*self->usrp_object, gain, (size_t) subdev.index))) {
+            return NULL;
+        }
+        if (!uhd_ok(uhd_usrp_get_normalized_rx_gain(*self->usrp_object, (size_t) subdev.index, &checkval))) {
+            return NULL;
+        }
+    } else if (subdev.mode == TX_STREAM) {
+        if (!uhd_ok(uhd_usrp_set_normalized_tx_gain(*self->usrp_object, gain, (size_t) subdev.index))) {
+            return NULL;
+        }
+        if (!uhd_ok(uhd_usrp_get_normalized_tx_gain(*self->usrp_object, (size_t) subdev.index, &checkval))) {
+            return NULL;
+        }
     }
-    if (!uhd_ok(uhd_usrp_get_normalized_rx_gain(*self->usrp_object, (size_t) channel, &checkval))) {
-        return NULL;
-    }
+
     return PyFloat_FromDouble(checkval);
 }
 
@@ -407,40 +417,106 @@ Usrp_set_rate(Usrp *self, PyObject *args, PyObject *kwds) {
     printf("KWS:   %s\n", PyString_AsString(PyObject_Repr(kwds)));
 
     double rate = 1.0;
-    char *subdev = NULL;
+    char *subdev_spec = NULL;
 
     static char *kwlist[] = {"subdev", "rate", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|d", kwlist,
-                                     &subdev, &rate
+                                     &subdev_spec, &rate
     )) {
         return NULL;
     }
-    printf("subdev: %s  setting rate to %F\n", subdev, rate);
+    printf("subdev_spec: %s  setting rate to %F\n", subdev_spec, rate);
     fflush(stdout);
-    // what if we get a tx subdev?
-    int rx_stream_index = 0;
-    for (unsigned int ii = 0; ii < self->number_rx_streams; ++ii) {
-        if (strncmp(self->rx_streams[ii].subdev, subdev, 6) == 0) {
-            rx_stream_index = ii;
-            break;
-        }
+
+    pysdr_subdev_t subdev;
+    subdev = subdev_from_spec(self, subdev_spec);
+    fflush(stdout);
+    double checkval = -1.0;
+    if (subdev.mode == RX_STREAM) {
+        puts("rx stream\n");
+        fflush(stdout);
+        checkval = pysdr_set_rx_rate(*self->usrp_object, self->rx_streams[subdev.index].rate, (size_t) subdev.index);
+    } else if (subdev.mode == TX_STREAM) {
+        puts("tx stream\n");
+        fflush(stdout);
+        checkval = pysdr_set_tx_rate(*self->usrp_object, self->tx_streams[subdev.index].rate, (size_t) subdev.index);
+    } else {
+        // this is neither, error!
     }
 
-    double checkval;
-    if (!uhd_ok(uhd_usrp_set_rx_rate(*self->usrp_object, self->rx_streams[rx_stream_index].rate,
-                                     (size_t) rx_stream_index))) {
+    if (checkval < 0.0) {
         return NULL;
     }
-    if (!uhd_ok(uhd_usrp_get_rx_rate(*self->usrp_object, (size_t) rx_stream_index, &checkval))) {
-        return NULL;
-    }
+
     return PyFloat_FromDouble(checkval);
 }
 
 
+static const char send_docstring[] =
+        "Usrp.send(samples, metadata)\n\n"
+                "    send a vector of samples to the USRP for transmission";
+
+static PyObject *
+Usrp_send(Usrp *self, PyObject *args, PyObject *kwds) {
+
+    static char *kwlist[] = {"samples", "metadata", NULL};
+    PyObject *samples=NULL, *metadata=NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO|OO", kwlist,
+                                     &samples, &metadata
+    )) {
+        return NULL;
+    }
+
+    int ndims = PyArray_NDIM((PyArrayObject*) samples);
+    size_t samples_per_buffer = 0;
+    int number_channels = 0;
+    npy_intp *samples_shape;
+    samples_shape = PyArray_SHAPE((PyArrayObject*) samples);
+    switch (ndims) {
+        case 0:
+            // this is an error
+            break;
+        case 1:
+            samples_per_buffer = (size_t) samples_shape[0];
+            number_channels = 1;
+            break;
+        case 2:
+            number_channels = (int) samples_shape[0];
+            samples_per_buffer = (size_t) samples_shape[1];
+            break;
+        default:
+            // this is an error
+            break;
+    }
+    printf("across %i channels there are %lu samples per channel\n", number_channels, samples_per_buffer);
+    uhd_tx_metadata_handle tx_metadata;
+    puts("making metadata\n");
+    uhd_tx_metadata_make(&tx_metadata, false, 0, 0.0, false, false);
+    puts("done making metadata\n");
+    fflush(stdout);
+    double timeout = 1.0;
+
+    size_t rx_samples_count = 0;
+    time_t full_secs = 0;
+    double frac_secs = 0.;
+    int tx_stream_index = 0;
+    const void *samples_ptr = PyArray_DATA((PyArrayObject*) samples);
+
+    size_t items_sent;
+    puts("sending\n");
+    fflush(stdout);
+    uhd_tx_streamer_send(*self->tx_streamer, &samples_ptr, samples_per_buffer, &tx_metadata, timeout, &items_sent);
+    printf("transmitted %lu items\n", items_sent);
+    fflush(stdout);
+
+    return Py_None;
+}
+
 static PyMethodDef Usrp_methods[] = {
         {"recv",                  (PyCFunction) Usrp_recv,                  METH_NOARGS,  recv_docstring},
+        {"send",                  (PyCFunction) Usrp_send,                  METH_VARARGS |
+                                                                            METH_KEYWORDS,  send_docstring},
         {"sensor_names",          (PyCFunction) Usrp_sensor_names,          METH_NOARGS,  sensor_names_docstring},
         {"get_sensor",            (PyCFunction) Usrp_get_sensor,            METH_VARARGS |
                                                                             METH_KEYWORDS, get_sensor_docstring},
@@ -642,7 +718,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
     uhd_usrp_get_pp_string(*self->usrp_object, usrp_pp, 2048);
     /* DEV HELPER */ printf("usrp: %s\n", usrp_pp);
 
-    size_t channel[] = {0, 1, 2, 3};
+    size_t channel[] = {0, 1, 2, 3, 4, 5, 6, 7};
     char rx_subdev_spec_string[64] = {'\0'};
 
     if (streams_dict) {
@@ -718,14 +794,50 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
             self->recv_buffers_ptr[rx_stream_index] = self->recv_buffers + (rx_stream_index * buffer_size_per_channel);
         }
     }
+
+    for (size_t tx_stream_index = 0; tx_stream_index < self->number_tx_streams; ++tx_stream_index) {
+        printf("setting up tx stream %lu\n", tx_stream_index);
+        if (!uhd_ok(uhd_usrp_set_tx_antenna(*self->usrp_object,
+                                            self->tx_streams[tx_stream_index].antenna,
+                                            channel[tx_stream_index]) )) {
+            return -1;
+        }
+        puts("set antenna\n");
+        fflush(stdout);
+
+        PyObject *empty_arg = PyTuple_New(0);
+        PyObject *rate_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
+                                           "rate", self->tx_streams[tx_stream_index].rate);
+        Usrp_set_rate(self, empty_arg, rate_kws);
+
+        PyObject *gain_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
+                                           "gain", self->tx_streams[tx_stream_index].gain);
+        Usrp_set_gain(self, empty_arg, gain_kws);
+        puts("set gain\n");
+        fflush(stdout);
+        PyObject *freq_kws = Py_BuildValue("{s:s,s:d,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
+                                           "center_frequency", self->tx_streams[tx_stream_index].frequency,
+                                           "offset", self->tx_streams[tx_stream_index].lo_offset);
+        Usrp_set_frequency(self, empty_arg, freq_kws);
+        puts("set frequency\n");
+        fflush(stdout);
+    }
+    if (self->number_tx_streams > 0) {
+        puts("make the tx streamer object\n");
+        if (!uhd_ok(uhd_usrp_get_tx_stream(*self->usrp_object, &stream_args, *self->tx_streamer))) {
+            return -1;
+        }
+
+        if (!uhd_ok(uhd_tx_streamer_max_num_samps(*self->tx_streamer, &self->samples_per_buffer))) {
+            return -1;
+        }
+    }
+
     if (!uhd_ok( uhd_subdev_spec_free(&subdev_spec) )) {
         return -1;
     }
 
 
-    for (size_t tx_stream_index = 0; tx_stream_index < self->number_tx_streams; ++tx_stream_index) {
-        // TODO: set up tx streams
-    }
     puts("done initing\n");
     fflush(stdout);
 
