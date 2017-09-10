@@ -462,10 +462,17 @@ Usrp_send(Usrp *self, PyObject *args, PyObject *kwds) {
 
     static char *kwlist[] = {"samples", "metadata", NULL};
     PyObject *samples=NULL, *metadata=NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO|OO", kwlist,
-                                     &samples, &metadata
-    )) {
-        return NULL;
+//    if (!PyArg_VaParseTupleAndKeywords(args, kwds, "O|OO", kwlist, vargs
+//    )) {
+//        return NULL;
+//    }
+    //                                     &samples, &metadata
+    Py_ssize_t args_size = PyTuple_Size(args);
+    if (args_size > 0) {
+        samples = PyTuple_GetItem(args, 0);
+    }
+    if (args_size == 2) {
+        metadata = PyTuple_GetItem(args, 1);
     }
 
     int ndims = PyArray_NDIM((PyArrayObject*) samples);
@@ -489,12 +496,8 @@ Usrp_send(Usrp *self, PyObject *args, PyObject *kwds) {
             // this is an error
             break;
     }
-    printf("across %i channels there are %lu samples per channel\n", number_channels, samples_per_buffer);
     uhd_tx_metadata_handle tx_metadata;
-    puts("making metadata\n");
-    uhd_tx_metadata_make(&tx_metadata, false, 0, 0.0, false, false);
-    puts("done making metadata\n");
-    fflush(stdout);
+    uhd_tx_metadata_make(&tx_metadata, true, 0, 0.1, true, false);
     double timeout = 1.0;
 
     size_t rx_samples_count = 0;
@@ -504,13 +507,10 @@ Usrp_send(Usrp *self, PyObject *args, PyObject *kwds) {
     const void *samples_ptr = PyArray_DATA((PyArrayObject*) samples);
 
     size_t items_sent;
-    puts("sending\n");
-    fflush(stdout);
     uhd_tx_streamer_send(*self->tx_streamer, &samples_ptr, samples_per_buffer, &tx_metadata, timeout, &items_sent);
-    printf("transmitted %lu items\n", items_sent);
-    fflush(stdout);
+    uhd_tx_metadata_free(&tx_metadata);
 
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyMethodDef Usrp_methods[] = {
@@ -567,8 +567,10 @@ static const char Usrp_docstring[] =
 static void
 Usrp_dealloc(Usrp *self) {
     printf("deallocing usrp\n");
+    fflush(stdout);
     Py_XDECREF(self->addr);
     Py_XDECREF(self->usrp_type);
+
 
     if (self->rx_streamer != NULL) {
         uhd_rx_streamer_free(self->rx_streamer);
@@ -836,7 +838,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
     if (!uhd_ok( uhd_subdev_spec_free(&subdev_spec) )) {
         return -1;
     }
-
 
     puts("done initing\n");
     fflush(stdout);
