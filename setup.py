@@ -5,16 +5,18 @@ from __future__ import print_function
 
 from setuptools import setup, Extension
 import os
+import numpy
+
 
 # Find include and lib paths based on whether or not they sourced their PYBOMBS install
 if os.environ.get('PYBOMBS_PREFIX') is not None:
     print("Found PYBOMBS Install!")
     LIBRARY_PATH = [os.environ['LIBRARY_PATH'].split(':')[0]] # first element should be the right one... kind of messy
-    INCLUDE_PATH = [os.environ['PYBOMBS_PREFIX'] + '/include']
+    INCLUDE_PATH = [os.environ['PYBOMBS_PREFIX'] + '/include', numpy.get_include()]
 else:
     print("Did not find PYBOMBS install (did you forget to source it?), using /usr/local")
     LIBRARY_PATH = ['/usr/local/lib']
-    INCLUDE_PATH = ['/usr/local/include']  
+    INCLUDE_PATH = ['/usr/local/include', numpy.get_include()]  
 
 pysdruhd = Extension('pysdruhd',
                     include_dirs = INCLUDE_PATH,
