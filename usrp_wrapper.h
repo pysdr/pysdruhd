@@ -503,11 +503,21 @@ Usrp_send(Usrp *self, PyObject *args, PyObject *kwds) {
 static PyObject *
 Usrp_str(Usrp *self) {
 
-    char *str_representation = malloc(3);
-    str_representation[0] = '{';
-    str_representation[1] = '\n';
-    str_representation[2] = '\0';
-    size_t current_str_len = 3;
+    // this is mildly dangerous. It's a reeeeal pain to keep track of char counts so let's just malloc and realloc
+    // generously. yaaaaaay C!
+    char *str_representation = malloc(1024);
+
+    sprintf(str_representation, "{");
+    if (self->usrp_type) {
+        sprintf(str_representation, "%stype:'%s', ", str_representation, PyString_AsString(self->usrp_type));
+    }
+    if (self->addr) {
+        sprintf(str_representation, "%s{addr:'%s', ", str_representation, PyString_AsString(self->addr));
+    }
+    sprintf(str_representation, "%s \n", str_representation);
+
+    size_t current_str_len = 1024;
+
     // This should look something like {"subdev":{}...}
     for (unsigned int rx_stream_indx=0; rx_stream_indx < self->number_rx_streams; ++rx_stream_indx) {
         stream_config_t this_stream = self->rx_streams[rx_stream_indx];
@@ -823,7 +833,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
         Usrp_set_frequency(self, empty_arg, freq_kws);
     }
     if (self->number_rx_streams > 0) {
-        puts("make the stremer object\n");
         if (!uhd_ok(uhd_usrp_get_rx_stream(*self->usrp_object, &stream_args, *self->rx_streamer))) {
             return -1;
         }
@@ -862,7 +871,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
         Usrp_set_frequency(self, empty_arg, freq_kws);
     }
     if (self->number_tx_streams > 0) {
-        puts("make the tx streamer object\n");
         if (!uhd_ok(uhd_usrp_get_tx_stream(*self->usrp_object, &stream_args, *self->tx_streamer))) {
             return -1;
         }
