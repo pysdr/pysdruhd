@@ -17,7 +17,6 @@ typedef enum {
     RX_BURST,
 } stream_mode_t;
 
-
 typedef struct {
     stream_mode_t mode;
     double frequency;

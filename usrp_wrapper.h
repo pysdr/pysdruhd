@@ -413,9 +413,6 @@ static const char set_rate_docstring[] =
 
 static PyObject *
 Usrp_set_rate(Usrp *self, PyObject *args, PyObject *kwds) {
-    printf("ARGS:   %s\n", PyString_AsString(PyObject_Repr(args)));
-    printf("KWS:   %s\n", PyString_AsString(PyObject_Repr(kwds)));
-
     double rate = 1.0;
     char *subdev_spec = NULL;
 
@@ -426,23 +423,16 @@ Usrp_set_rate(Usrp *self, PyObject *args, PyObject *kwds) {
     )) {
         return NULL;
     }
-    printf("subdev_spec: %s  setting rate to %F\n", subdev_spec, rate);
-    fflush(stdout);
 
     pysdr_subdev_t subdev;
     subdev = subdev_from_spec(self, subdev_spec);
-    fflush(stdout);
     double checkval = -1.0;
     if (subdev.mode == RX_STREAM) {
-        puts("rx stream\n");
-        fflush(stdout);
         checkval = pysdr_set_rx_rate(*self->usrp_object, self->rx_streams[subdev.index].rate, (size_t) subdev.index);
     } else if (subdev.mode == TX_STREAM) {
-        puts("tx stream\n");
-        fflush(stdout);
         checkval = pysdr_set_tx_rate(*self->usrp_object, self->tx_streams[subdev.index].rate, (size_t) subdev.index);
     } else {
-        // this is neither, error!
+        return NULL;
     }
 
     if (checkval < 0.0) {
@@ -462,11 +452,7 @@ Usrp_send(Usrp *self, PyObject *args, PyObject *kwds) {
 
     static char *kwlist[] = {"samples", "metadata", NULL};
     PyObject *samples=NULL, *metadata=NULL;
-//    if (!PyArg_VaParseTupleAndKeywords(args, kwds, "O|OO", kwlist, vargs
-//    )) {
-//        return NULL;
-//    }
-    //                                     &samples, &metadata
+
     Py_ssize_t args_size = PyTuple_Size(args);
     if (args_size > 0) {
         samples = PyTuple_GetItem(args, 0);
@@ -512,6 +498,67 @@ Usrp_send(Usrp *self, PyObject *args, PyObject *kwds) {
 
     Py_RETURN_NONE;
 }
+
+
+static PyObject *
+Usrp_str(Usrp *self) {
+
+    char *str_representation = malloc(3);
+    str_representation[0] = '{';
+    str_representation[1] = '\n';
+    str_representation[2] = '\0';
+    size_t current_str_len = 3;
+    // This should look something like {"subdev":{}...}
+    for (unsigned int rx_stream_indx=0; rx_stream_indx < self->number_rx_streams; ++rx_stream_indx) {
+        stream_config_t this_stream = self->rx_streams[rx_stream_indx];
+        size_t this_str_len;
+
+        char mode_str[5];
+        if (this_stream.mode == RX_STREAM) {
+            sprintf(mode_str, "%s", "RX");
+        } else if (this_stream.mode == TX_STREAM) {
+            sprintf(mode_str, "%s", "TX");
+        }
+
+        const char fmt_str[] = "%s '%s': {'mode': '%s', 'antenna': '%s', 'frequency': %1.2f, 'rate': %1.2f, 'gain': %1.2f},\n";
+        this_str_len = strlen(fmt_str) + strlen(this_stream.antenna) + strlen(this_stream.subdev);
+        str_representation = realloc(str_representation, current_str_len + this_str_len + 32);
+        sprintf(str_representation, fmt_str,
+                str_representation, this_stream.subdev, mode_str, this_stream.antenna,
+                this_stream.frequency, this_stream.frequency, this_stream.gain);
+    }
+    for (unsigned int tx_stream_indx=0; tx_stream_indx < self->number_tx_streams; ++tx_stream_indx) {
+        stream_config_t this_stream = self->tx_streams[tx_stream_indx];
+        size_t this_str_len;
+
+        char mode_str[5];
+        if (this_stream.mode == RX_STREAM) {
+            sprintf(mode_str, "%s", "RX");
+        } else if (this_stream.mode == TX_STREAM) {
+            sprintf(mode_str, "%s", "TX");
+        }
+
+        const char fmt_str[] = "%s '%s': {'mode': '%s', 'antenna': '%s', 'frequency': %1.2f, 'rate': %1.2f, 'gain': %1.2f},\n";
+        this_str_len = strlen(fmt_str) + strlen(this_stream.antenna) + strlen(this_stream.subdev);
+        str_representation = realloc(str_representation, current_str_len + this_str_len + 32);
+        sprintf(str_representation, fmt_str,
+                str_representation, this_stream.subdev, mode_str, this_stream.antenna,
+                this_stream.frequency, this_stream.frequency, this_stream.gain);
+    }
+
+    sprintf(str_representation, "%s}", str_representation);
+    PyObject *ret_str = PyString_FromString(str_representation);
+    free(str_representation);
+
+    return ret_str;
+}
+
+static PyObject *
+Usrp_repr(Usrp *self) {
+    // actually, I should sprintf this in a Usrp(...)
+    return Usrp_str(self);
+}
+
 
 static PyMethodDef Usrp_methods[] = {
         {"recv",                  (PyCFunction) Usrp_recv,                  METH_NOARGS,  recv_docstring},
@@ -566,8 +613,6 @@ static const char Usrp_docstring[] =
 
 static void
 Usrp_dealloc(Usrp *self) {
-    printf("deallocing usrp\n");
-    fflush(stdout);
     Py_XDECREF(self->addr);
     Py_XDECREF(self->usrp_type);
 
@@ -740,6 +785,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
         self->rx_streams[0].rate = rate_param;
         self->rx_streams[0].gain = gain_param;
         strncpy(self->rx_streams[0].subdev, "A:0\0", 4);
+        strncpy(self->rx_streams[0].antenna, "RX2\0", 4);
     }
 
     // We should accept a stream_args dict
@@ -752,12 +798,10 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
     };
 
     uhd_subdev_spec_handle subdev_spec;
-    printf("subdev spec string: %s\n", rx_subdev_spec_string);
     uhd_subdev_spec_make(&subdev_spec, rx_subdev_spec_string);
     uhd_usrp_set_rx_subdev_spec(*self->usrp_object, subdev_spec, 0);
 
     for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
-        printf("setting up rx stream %lu\n", rx_stream_index);
         if (!uhd_ok(uhd_usrp_set_rx_antenna(*self->usrp_object,
                                             self->rx_streams[rx_stream_index].antenna,
                                             channel[rx_stream_index]) )) {
@@ -798,14 +842,11 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
     }
 
     for (size_t tx_stream_index = 0; tx_stream_index < self->number_tx_streams; ++tx_stream_index) {
-        printf("setting up tx stream %lu\n", tx_stream_index);
         if (!uhd_ok(uhd_usrp_set_tx_antenna(*self->usrp_object,
                                             self->tx_streams[tx_stream_index].antenna,
                                             channel[tx_stream_index]) )) {
             return -1;
         }
-        puts("set antenna\n");
-        fflush(stdout);
 
         PyObject *empty_arg = PyTuple_New(0);
         PyObject *rate_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
@@ -815,14 +856,10 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
         PyObject *gain_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
                                            "gain", self->tx_streams[tx_stream_index].gain);
         Usrp_set_gain(self, empty_arg, gain_kws);
-        puts("set gain\n");
-        fflush(stdout);
         PyObject *freq_kws = Py_BuildValue("{s:s,s:d,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
                                            "center_frequency", self->tx_streams[tx_stream_index].frequency,
                                            "offset", self->tx_streams[tx_stream_index].lo_offset);
         Usrp_set_frequency(self, empty_arg, freq_kws);
-        puts("set frequency\n");
-        fflush(stdout);
     }
     if (self->number_tx_streams > 0) {
         puts("make the tx streamer object\n");
@@ -839,9 +876,6 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
         return -1;
     }
 
-    puts("done initing\n");
-    fflush(stdout);
-
     free(device_args);
     return 0;
 }
@@ -852,18 +886,18 @@ static PyTypeObject UsrpType = {
         "pysdruhd.Usrp",             /* tp_name */
         sizeof(Usrp), /* tp_basicsize */
         0,                         /* tp_itemsize */
-        (destructor) Usrp_dealloc,         /* tp_dealloc */
-        0,                         /* tp_print */
+        (destructor) Usrp_dealloc, /* tp_dealloc */
+        0,       /* tp_print */
         0,                         /* tp_getattr */
         0,                         /* tp_setattr */
         0,                         /* tp_compare */
-        0,                         /* tp_repr */
+        (reprfunc) Usrp_repr,      /* tp_repr */
         0,                         /* tp_as_number */
         0,                         /* tp_as_sequence */
         0,                         /* tp_as_mapping */
         0,                         /* tp_hash */
         0,                         /* tp_call */
-        0,                         /* tp_str */
+        (reprfunc) Usrp_str,       /* tp_str */
         0,                         /* tp_getattro */
         0,                         /* tp_setattro */
         0,                         /* tp_as_buffer */

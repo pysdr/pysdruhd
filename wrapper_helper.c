@@ -40,6 +40,7 @@ void parse_dict_to_streams_config(Usrp *self, PyObject *streams_dict, double fre
         this_subdev.lo_offset = lo_offset_param;
         this_subdev.rate = rate_param;
         this_subdev.gain = gain_param;
+        strncpy(this_subdev.antenna, "RX2\0", 4);
 
         value = PyDict_GetItemString(config, "antenna\0");
         if (value != NULL) {
