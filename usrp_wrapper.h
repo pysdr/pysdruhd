@@ -249,6 +249,53 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds) {
     return Py_None;
 }
 
+typedef enum {CLOCK, TIME} SOURCE_TYPE;
+
+PyObject * get_source_list(Usrp *self, SOURCE_TYPE type)
+{
+    uhd_string_vector_handle sources;
+    uhd_string_vector_make(&sources);
+
+    switch (type) {
+        case CLOCK:
+            uhd_usrp_get_clock_sources(*self->usrp_object, 0, &sources);
+            break;
+        case TIME:
+            uhd_usrp_get_time_sources(*self->usrp_object, 0, &sources);
+            break;
+        default:
+            printf("got an unknown source type\n");
+    }
+
+    size_t number_sources;
+    uhd_string_vector_size(sources, &number_sources);
+    PyObject *sources_list = PyList_New((Py_ssize_t) number_sources);
+    for (unsigned int tsource_index = 0; tsource_index < number_sources; ++tsource_index) {
+        char this_time_source[128];
+        const size_t this_time_source_length = 128;
+        uhd_string_vector_at(sources, tsource_index, this_time_source, this_time_source_length);
+        PyList_SetItem(sources_list, tsource_index, PyString_FromString(this_time_source));
+    }
+    uhd_string_vector_free(&sources);
+    return sources_list;
+}
+
+static const char get_time_sources_docstring[] =
+        "get a list of time sources";
+static PyObject *
+Usrp_get_time_sources(Usrp *self)
+{
+    return get_source_list(self, TIME);
+
+}
+
+static const char get_clock_sources_docstring[] =
+        "get a list of clock sources";
+static PyObject *
+Usrp_get_clock_sources(Usrp *self)
+{
+    return get_source_list(self, CLOCK);
+}
 
 static const char send_stream_command_docstring[] =
         "send_stream_command(mode='continuous', when='now')\n\n"
@@ -265,6 +312,17 @@ Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds) {
         return NULL;
     }
 
+    PyObject *requested_commands;
+//    PyDict_Items();
+//    PyDict_GetItemString()
+    requested_commands = PyDict_Keys(command);
+    Py_ssize_t number_of_commands = PyList_Size(requested_commands);
+    for (Py_ssize_t command_number=0; command_number < number_of_commands; ++command_number) {
+        PyObject *command_key;
+        command_key = PyList_GetItem(requested_commands, command_number);
+        printf("got a command with key %s ", PyString_AsString(command_key));
+        printf("that has a value of %s\n", PyString_AsString(PyDict_GetItem(command, command_key)));
+    }
     /* This should really be made adjustable, which would make this wrapper probably
      * the only place that this is an easy way to get streaming started at a time
      * that you care about
@@ -588,6 +646,8 @@ static PyMethodDef Usrp_methods[] = {
                                                                             METH_KEYWORDS, set_gain_docstring},
         {"set_rate",              (PyCFunction) Usrp_set_rate,              METH_VARARGS |
                                                                             METH_KEYWORDS, set_rate_docstring},
+        {"get_time_sources",      (PyCFunction) Usrp_get_time_sources,      METH_NOARGS, get_time_sources_docstring},
+        {"get_clock_sources",     (PyCFunction) Usrp_get_clock_sources,     METH_NOARGS, get_clock_sources_docstring},
         {NULL}  /* Sentinel */
 };
 
@@ -844,6 +904,7 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
         size_t buffer_size_per_channel = self->samples_per_buffer * 2 * sizeof(float);
         self->recv_buffers = malloc(self->number_rx_streams * buffer_size_per_channel);
         self->recv_buffers_ptr = malloc(sizeof(void *) * self->number_rx_streams);
+        printf("making receive buffer sizes per channel %zu\n", buffer_size_per_channel);
         // watch out world, we're indexing void* 's!
         for (size_t rx_stream_index = 0; rx_stream_index < self->number_rx_streams; ++rx_stream_index) {
             self->recv_buffers_ptr[rx_stream_index] = self->recv_buffers + (rx_stream_index * buffer_size_per_channel);
