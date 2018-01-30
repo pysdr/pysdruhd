@@ -23,14 +23,13 @@
 
 
 #include "usrp_object.h"
+#include "clock_and_time_sources.h"
 #include "wrapper_helper.h"
 #include <uhd.h>
 #include <stdio.h>
 #include <string.h>
 #include <structmember.h>
 #include <sys/time.h>
-
-
 
 
 static PyMemberDef Usrp_members[] = {
@@ -249,60 +248,14 @@ Usrp_set_time(Usrp *self, PyObject *args, PyObject *kwds) {
     return Py_None;
 }
 
-typedef enum {CLOCK, TIME} SOURCE_TYPE;
-
-PyObject * get_source_list(Usrp *self, SOURCE_TYPE type)
-{
-    uhd_string_vector_handle sources;
-    uhd_string_vector_make(&sources);
-
-    switch (type) {
-        case CLOCK:
-            uhd_usrp_get_clock_sources(*self->usrp_object, 0, &sources);
-            break;
-        case TIME:
-            uhd_usrp_get_time_sources(*self->usrp_object, 0, &sources);
-            break;
-        default:
-            printf("got an unknown source type\n");
-    }
-
-    size_t number_sources;
-    uhd_string_vector_size(sources, &number_sources);
-    PyObject *sources_list = PyList_New((Py_ssize_t) number_sources);
-    for (unsigned int tsource_index = 0; tsource_index < number_sources; ++tsource_index) {
-        char this_time_source[128];
-        const size_t this_time_source_length = 128;
-        uhd_string_vector_at(sources, tsource_index, this_time_source, this_time_source_length);
-        PyList_SetItem(sources_list, tsource_index, PyString_FromString(this_time_source));
-    }
-    uhd_string_vector_free(&sources);
-    return sources_list;
-}
-
-static const char get_time_sources_docstring[] =
-        "get a list of time sources";
-static PyObject *
-Usrp_get_time_sources(Usrp *self)
-{
-    return get_source_list(self, TIME);
-
-}
-
-static const char get_clock_sources_docstring[] =
-        "get a list of clock sources";
-static PyObject *
-Usrp_get_clock_sources(Usrp *self)
-{
-    return get_source_list(self, CLOCK);
-}
 
 static const char send_stream_command_docstring[] =
         "send_stream_command(mode='continuous', when='now')\n\n"
                 "    send_stream_command will create and issue a stream command to UHD. UHD stream commands send an rx or tx "
                 "streamer a command that contains a `stream_mode` enum, `stream_now` bool, and optionall a timespec. This wrapper "
                 "accepts the mode as a string and when can either be a string matching 'now' or a tuple of (full secs, fractional "
-                "secs)";
+                "secs).\n\n"
+                "N.B. from UHD docs: to use an on-board GPSDO use set_time_source('external') and set_clock_source('external')";
 // Ooops! this isn't actually doing anything yet
 static PyObject *
 Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds) {
@@ -313,8 +266,6 @@ Usrp_send_stream_command(Usrp *self, PyObject *args, PyObject *kwds) {
     }
 
     PyObject *requested_commands;
-//    PyDict_Items();
-//    PyDict_GetItemString()
     requested_commands = PyDict_Keys(command);
     Py_ssize_t number_of_commands = PyList_Size(requested_commands);
     for (Py_ssize_t command_number=0; command_number < number_of_commands; ++command_number) {
@@ -647,7 +598,11 @@ static PyMethodDef Usrp_methods[] = {
         {"set_rate",              (PyCFunction) Usrp_set_rate,              METH_VARARGS |
                                                                             METH_KEYWORDS, set_rate_docstring},
         {"get_time_sources",      (PyCFunction) Usrp_get_time_sources,      METH_NOARGS, get_time_sources_docstring},
+        {"get_time_source",       (PyCFunction) Usrp_get_time_source,       METH_NOARGS, get_time_source_docstring},
+        {"set_time_source",       (PyCFunction) Usrp_set_time_source,       METH_VARARGS, set_time_source_docstring},
         {"get_clock_sources",     (PyCFunction) Usrp_get_clock_sources,     METH_NOARGS, get_clock_sources_docstring},
+        {"get_clock_source",      (PyCFunction) Usrp_get_clock_source,      METH_NOARGS, get_clock_source_docstring},
+        {"set_clock_source",      (PyCFunction) Usrp_set_clock_source,      METH_VARARGS, set_clock_source_docstring},
         {NULL}  /* Sentinel */
 };
 
