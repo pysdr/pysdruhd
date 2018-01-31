@@ -800,8 +800,8 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
                                            "rate", self->tx_streams[tx_stream_index].rate);
         Usrp_set_rate(self, empty_arg, rate_kws);
 
-        PyObject *gain_kws = Py_BuildValue("{s:s,s:d,s:s}", "subdev", self->rx_streams[rx_stream_index].subdev,
-                                           "gain", self->rx_streams[rx_stream_index].gain,
+        PyObject *gain_kws = Py_BuildValue("{s:s,s:d,s:s}", "subdev", self->tx_streams[tx_stream_index].subdev,
+                                           "gain", self->tx_streams[tx_stream_index].gain,
                                            "mode", "normalized");
 
         Usrp_set_gain(self, empty_arg, gain_kws);
