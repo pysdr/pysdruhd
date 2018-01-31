@@ -12,6 +12,14 @@ You need python (currently I don't do much cmake-fu to detect python versions, s
 3. `make`
 4. `sudo make install`
 
+## Binary install
+
+I currently upload a package to [anaconda](https://anaconda.org/n-west/pysdruhd) that you can install with
+
+    conda install -c n-west pysdruhd
+
+that will install my UHD package as well.
+
 ## Status
 
 There's a ton of features missing and it's not so graceful when things fail. You can either wait for that to improve, try to fix and add things, or ignore the project.
