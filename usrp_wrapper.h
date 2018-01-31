@@ -303,7 +303,7 @@ Usrp_set_gain(Usrp *self, PyObject *args, PyObject *kwds) {
 
     static char *kwlist[] = {"subdev", "gain", "mode", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ds", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|sds", kwlist,
                                      &subdev_spec, &gain, &gain_mode
     )) {
         return NULL;
@@ -759,8 +759,9 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
                                            "rate", self->rx_streams[rx_stream_index].rate);
         Usrp_set_rate(self, empty_arg, rate_kws);
 
-        PyObject *gain_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->rx_streams[rx_stream_index].subdev,
-                                           "gain", self->rx_streams[rx_stream_index].gain);
+        PyObject *gain_kws = Py_BuildValue("{s:s,s:d,s:s}", "subdev", self->rx_streams[rx_stream_index].subdev,
+                                           "gain", self->rx_streams[rx_stream_index].gain,
+                                            "mode", "normalized");
         Usrp_set_gain(self, empty_arg, gain_kws);
 
         PyObject *freq_kws = Py_BuildValue("{s:s,s:d,s:d}", "subdev", self->rx_streams[rx_stream_index].subdev,
@@ -799,8 +800,10 @@ Usrp_init(Usrp *self, PyObject *args, PyObject *kwds) {
                                            "rate", self->tx_streams[tx_stream_index].rate);
         Usrp_set_rate(self, empty_arg, rate_kws);
 
-        PyObject *gain_kws = Py_BuildValue("{s:s,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
-                                           "gain", self->tx_streams[tx_stream_index].gain);
+        PyObject *gain_kws = Py_BuildValue("{s:s,s:d,s:s}", "subdev", self->rx_streams[rx_stream_index].subdev,
+                                           "gain", self->rx_streams[rx_stream_index].gain,
+                                           "mode", "normalized");
+
         Usrp_set_gain(self, empty_arg, gain_kws);
         PyObject *freq_kws = Py_BuildValue("{s:s,s:d,s:d}", "subdev", self->tx_streams[tx_stream_index].subdev,
                                            "center_frequency", self->tx_streams[tx_stream_index].frequency,
