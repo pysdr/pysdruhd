@@ -5,7 +5,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 set(CMAKE_C_STANDARD 99)
 
-set(SOURCE_FILES pysdruhd.c usrp_wrapper.h wrapper_helper.c wrapper_helper.h usrp_object.h clock_and_time_sources.h sensors.h)
+set(SOURCE_FILES pysdruhd.c usrp_wrapper.h wrapper_helper.c wrapper_helper.h usrp_object.h clock_and_time_sources.h sensors.h usrp_stream_command.h rf_settings.h recv.h usrp_time.h send.h)
 add_library(pysdruhd SHARED ${SOURCE_FILES})
 
 set_target_properties(pysdruhd PROPERTIES OUTPUT_NAME "pysdruhd" PREFIX "" SUFFIX .so)
