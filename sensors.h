@@ -20,7 +20,7 @@ Usrp_sensor_names(Usrp *self) {
     if (!uhd_ok(uhd_usrp_get_mboard_sensor_names(*self->usrp_object, 0, &sensor_names) )) {
         return NULL;
     }
-    __darwin_size_t number_sensors;
+    size_t number_sensors;
     if (!uhd_ok(uhd_string_vector_size(sensor_names, &number_sensors) )) {
         return NULL;
     }
